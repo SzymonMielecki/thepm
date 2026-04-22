@@ -1,0 +1,20 @@
+@import 'tailwindcss';
+
+@theme {
+	--font-sans: 'Inter', 'IBM Plex Sans', system-ui, sans-serif;
+	--color-surface-900: #0a0a0a;
+	--color-surface-800: #141414;
+	--color-surface-700: #1f1f1f;
+	--color-accent: #3b82f6;
+}
+
+html,
+body {
+	@apply min-h-dvh bg-zinc-950 text-zinc-100;
+}
+
+@layer base {
+	* {
+		@apply border-zinc-800;
+	}
+}
