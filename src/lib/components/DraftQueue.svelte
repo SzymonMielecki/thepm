@@ -5,14 +5,24 @@
 		description: string;
 		state: string;
 	};
-	let { drafts = [] as Draft[], token = '', onupdate = () => {} } = $props();
+	let {
+		drafts = [] as Draft[],
+		token = '',
+		onupdate = () => {},
+		ontoast = (_kind: 'success' | 'error', _message: string) => {}
+	} = $props();
 
 	async function approve(id: string) {
 		const r = await fetch(`/api/tickets/${id}/approve`, {
 			method: 'POST',
 			headers: { Authorization: token ? `Bearer ${token}` : '' }
 		});
-		if (r.ok) onupdate();
+		if (r.ok) {
+			await onupdate();
+			ontoast('success', 'Draft approved and sent to Linear.');
+			return;
+		}
+		ontoast('error', `Approve failed (${r.status}).`);
 	}
 
 	async function reject(id: string) {
@@ -20,11 +30,16 @@
 			method: 'POST',
 			headers: { Authorization: token ? `Bearer ${token}` : '' }
 		});
-		if (r.ok) onupdate();
+		if (r.ok) {
+			await onupdate();
+			ontoast('success', 'Draft rejected.');
+			return;
+		}
+		ontoast('error', `Reject failed (${r.status}).`);
 	}
 </script>
 
-<div class="flex h-full flex-col gap-2 overflow-y-auto rounded-lg border border-zinc-800 bg-zinc-900/50 p-3">
+<div class="flex min-h-0 h-full max-h-full flex-col gap-2 overflow-y-auto rounded-lg border border-zinc-800 bg-zinc-900/50 p-3">
 	<h2 class="text-xs font-semibold uppercase tracking-wider text-zinc-500">Ticket drafts</h2>
 	{#each drafts as d}
 		<article class="space-y-2 rounded border border-zinc-800 bg-zinc-950 p-3">

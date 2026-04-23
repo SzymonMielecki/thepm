@@ -22,7 +22,7 @@ const PATH = '/api/audio/stream';
 export function handleBrowserSocket(ws: WebSocket, req: IncomingMessage) {
 	const token = hubTokenFromBrowserUpgrade(req);
 	if (!isHubTokenValid(token)) {
-		ws.close(4001, 'HUB_TOKEN required');
+		ws.close(4001, 'Bridge access code required');
 		return;
 	}
 	const db = getOrCreateDatabase();

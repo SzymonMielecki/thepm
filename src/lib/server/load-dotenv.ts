@@ -2,12 +2,23 @@
  * SvelteKit does not put arbitrary .env keys on process.env for getEnv() —
  * load explicitly so HUB_TOKEN, API keys, etc. are available in server code.
  * Imported first from hooks.server.ts; also run from vite.config.ts and server.ts.
+ *
+ * Order: install (hub package) .env, then the **project** directory (THEPM_INVOCATION_CWD
+ * from global `thepm` first, else PROJECT_ROOT / cwd) so per-app .env is loaded for the right repo.
  */
 import { config } from 'dotenv';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
+const installRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 
-config({ path: resolve(root, '.env') });
-config({ path: resolve(root, '.env.local'), override: true });
+config({ path: resolve(installRoot, '.env') });
+config({ path: resolve(installRoot, '.env.local'), override: true });
+
+const projectBase = resolve(
+	process.env.THEPM_INVOCATION_CWD || process.env.PROJECT_ROOT || process.cwd()
+);
+if (projectBase !== installRoot) {
+	config({ path: resolve(projectBase, '.env') });
+	config({ path: resolve(projectBase, '.env.local'), override: true });
+}

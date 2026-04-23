@@ -5,30 +5,33 @@
  */
 import { parseArgs } from 'node:util';
 import { resolve } from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { WebSocket } from 'ws';
 import { z } from 'zod';
 import { executeCodeOp, type CodeBridgeContext } from './lib/server/code-bridge/execute-op';
 import type { CodeReqMessage } from './lib/server/code-bridge/protocol';
 
-const USAGE = `Usage: thepm-bridge \\
+const USAGE = `Usage: thepm bridge \\
   --hub-url <https://your-hub.example.com> \\
-  --token <HUB_TOKEN> \\
   --project-root <path> \\
   --prd <path-to-PRD.md> \\
+  [--token <BRIDGE_TOKEN>] \\
   [--workspace <id>]     (default: default; must match hub CODE_BRIDGE_WORKSPACE_ID)
 
 Example (run from the repo you are exposing):
-  thepm-bridge \\
-    --hub-url https://pm.example.com \\
-    --token "$HUB_TOKEN" \\
-    --project-root . \\
-    --prd PRD.md \\
-    --workspace default
+  thepm bridge \\
+  --hub-url https://pm.example.com \\
+  --project-root . \\
+  --prd PRD.md \\
+  --workspace default
+
+(Older installs may still invoke \`thepm-bridge\` with the same flags.)
 
 Options:
   -h, --help    Show this message
 
-Requires: ripgrep (\`rg\`) on PATH. The hub must use CODE_BACKEND=bridge and the same HUB_TOKEN.
+Requires: ripgrep (\`rg\`) on PATH. If \`--token\` is omitted, a UUID token is generated for this connection.
+After a successful connect, the hub may auto-generate PRD.md from this repo (see hub env \`BRIDGE_PRD_BOOTSTRAP\`; requires an LLM configured on the hub).
 
 Troubleshooting: If you see ECONNREFUSED, the hub is not listening on that URL/port — start the app from
 this repo (e.g. pnpm dev) and use the exact origin Vite prints (port may not be 5173 if the port is busy).
@@ -36,7 +39,7 @@ this repo (e.g. pnpm dev) and use the exact origin Vite prints (port may not be 
 
 const flagsSchema = z.object({
 	'hub-url': z.string().url(),
-	token: z.string().min(1, 'token must not be empty'),
+	token: z.string().min(1, 'token must not be empty').optional(),
 	'project-root': z.string().min(1, 'project-root must not be empty'),
 	prd: z.string().min(1, 'prd must not be empty'),
 	workspace: z.string().min(1).default('default')
@@ -67,7 +70,6 @@ function parseBridgeCli() {
 	}
 	const errors: string[] = [];
 	if (!values['hub-url']) errors.push('--hub-url is required');
-	if (!values.token) errors.push('--token is required');
 	if (!values['project-root']) errors.push('--project-root is required');
 	if (!values.prd) errors.push('--prd is required');
 	if (errors.length) {
@@ -78,7 +80,7 @@ function parseBridgeCli() {
 	}
 	const raw = {
 		'hub-url': values['hub-url']!.trim(),
-		token: values.token!.trim(),
+		token: values.token?.trim(),
 		'project-root': values['project-root']!.trim(),
 		prd: values.prd!.trim(),
 		workspace: (values.workspace ?? 'default').trim() || 'default'
@@ -114,21 +116,45 @@ function printConnRefusedHint(dialUrl: string) {
 	);
 }
 
+function uiUrlWithSession(
+	hubUrl: string,
+	routePath: string,
+	sessionToken: string,
+	token?: string
+): string {
+	const u = new URL(routePath, hubUrl);
+	u.searchParams.set('bridge_session', sessionToken);
+	if (token) u.searchParams.set('token', token);
+	return u.toString();
+}
+
+function uiUrlWithToken(hubUrl: string, routePath: string, token: string): string {
+	const u = new URL(routePath, hubUrl);
+	u.searchParams.set('token', token);
+	return u.toString();
+}
+
 async function main() {
 	const f = parseBridgeCli();
 	const hubUrl = f['hub-url'].replace(/\/$/, '');
 	const projectRoot = resolve(process.cwd(), f['project-root']);
 	const prdPath = resolve(process.cwd(), f.prd);
 	const workspace = f.workspace;
-	const hubToken = f.token;
+	const hubToken = f.token?.trim() || randomUUID();
 
 	const ctx: CodeBridgeContext = { projectRoot, prdPath };
 	const u = new URL(hubUrl);
 	const protocol = u.protocol === 'https:' ? 'wss:' : u.protocol === 'http:' ? 'ws:' : u.protocol;
-	const qs = new URLSearchParams({ token: hubToken, workspace }).toString();
+	const qp: Record<string, string> = { workspace };
+	if (hubToken) qp.token = hubToken;
+	const qs = new URLSearchParams(qp).toString();
 	const url = `${protocol}//${u.host}/api/bridge?${qs}`;
 	// eslint-disable-next-line no-console
 	console.log(`[thepm-bridge] connecting to ${u.host}/api/bridge (workspace=${workspace})`);
+	if (!f.token) {
+		// eslint-disable-next-line no-console
+		console.log(`[thepm-bridge] Generated bridge token: ${hubToken}`);
+	}
 	let reportedConnRefused = false;
 	const ws = new WebSocket(url);
 	const send = (o: object) => {
@@ -155,8 +181,34 @@ async function main() {
 		const t = (j as { type?: string }).type;
 		if (t === 'bridge_ack') {
 			if ((j as { ok?: boolean }).ok) {
+				const sessionToken = (j as { uiSessionToken?: string }).uiSessionToken;
+				const sessionExpiresAt = (j as { uiSessionExpiresAt?: number }).uiSessionExpiresAt;
 				// eslint-disable-next-line no-console
 				console.log('[thepm-bridge] ready');
+				if (sessionToken) {
+					// eslint-disable-next-line no-console
+					console.log(
+						`[thepm-bridge] Open dashboard: ${uiUrlWithSession(hubUrl, '/', sessionToken, hubToken)}`
+					);
+					// eslint-disable-next-line no-console
+					console.log(
+						`[thepm-bridge] Open mobile:    ${uiUrlWithSession(hubUrl, '/mobile', sessionToken, hubToken)}`
+					);
+					if (typeof sessionExpiresAt === 'number' && Number.isFinite(sessionExpiresAt)) {
+						// eslint-disable-next-line no-console
+						console.log(
+							`[thepm-bridge] Session expires: ${new Date(sessionExpiresAt).toISOString()}`
+						);
+					}
+				}
+				// eslint-disable-next-line no-console
+				console.log(
+					`[thepm-bridge] Open dashboard (token): ${uiUrlWithToken(hubUrl, '/', hubToken)}`
+				);
+				// eslint-disable-next-line no-console
+				console.log(
+					`[thepm-bridge] Open mobile (token):    ${uiUrlWithToken(hubUrl, '/mobile', hubToken)}`
+				);
 			} else {
 				// eslint-disable-next-line no-console
 				console.error('[thepm-bridge] refused:', (j as { error?: string }).error);

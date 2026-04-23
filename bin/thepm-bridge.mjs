@@ -11,10 +11,12 @@ const root =
 	process.env.THEPM_ROOT?.replace(/\/$/, '') ||
 	join(dirname(fileURLToPath(import.meta.url)), '..');
 const cli = join(root, 'src', 'bridge-cli.ts');
+const tsxLoader = join(root, 'node_modules', 'tsx', 'dist', 'loader.mjs');
+const invocationCwd = process.cwd();
 
-const p = spawn(process.execPath, ['--import', 'tsx', cli, ...process.argv.slice(2)], {
-	cwd: root,
+const p = spawn(process.execPath, ['--import', tsxLoader, cli, ...process.argv.slice(2)], {
+	cwd: invocationCwd,
 	stdio: 'inherit',
-	env: { ...process.env }
+	env: { ...process.env, THEPM_INVOCATION_CWD: invocationCwd }
 });
 p.on('exit', (code) => process.exit(code ?? 1));

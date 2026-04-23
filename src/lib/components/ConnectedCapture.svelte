@@ -38,7 +38,8 @@
 	<p class="mb-1.5 text-xs font-medium text-zinc-500">Connected capture</p>
 	{#if devices.length === 0}
 		<p class="text-xs text-zinc-600">No clients on <code class="text-zinc-500">/api/audio/stream</code> — open
-			<a href="/mobile" class="text-blue-400 hover:underline">mobile capture</a> on a device.</p>
+			<a href="/mobile" class="text-blue-400 hover:underline" target="_blank" rel="noopener noreferrer"
+				>mobile capture</a> on a device.</p>
 	{:else}
 		<ul class="flex flex-col gap-1.5 sm:flex-row sm:flex-wrap">
 			{#each devices as d (d.id)}

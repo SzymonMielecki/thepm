@@ -1,8 +1,6 @@
 import { SystemMessage, HumanMessage } from '@langchain/core/messages';
 import { getChatModel, invokeWithStructuredZod } from './llm';
-import { getProjectPaths } from '../config';
-import { getCodeBackend, isCodeBackendBridge } from '../code-bridge/code-backend';
-import { readScopedFile } from '../fs-scoped';
+import { getCodeBackend } from '../code-bridge/code-backend';
 import {
 	IntentOutputSchema,
 	type IntentOutput,
@@ -17,7 +15,11 @@ import { applyPrdPatch, readPrdForHub } from '../prd/store';
 
 const intentPrompt = `You are a product manager assistant. Classify the latest team utterance.
 The message may include the current root PRD (PRD.md) for context so you can align prd_update sections with existing headings.
-Return JSON only matching the schema. Use category "noise" for small talk. Use "ticket" for actionable engineering work, bugs, or tasks. Use "prd_update" for product scope or requirements. Extract file or component name hints: for prd_update, add fileHints whenever the request touches specific code, features, or paths so the doc can be grounded in repo search.`;
+Return JSON only matching the schema. Use category "noise" for small talk.
+Use "ticket" when the primary ask is actionable engineering work, bugs, or implementation tasks (even if the PRD should stay in sync — the ticket path captures the work).
+Use "prd_update" when the primary ask is to change product scope, requirements, or documentation wording only.
+If the utterance is mainly a PRD/doc update but it clearly implies engineering work to execute (e.g. "add feature X to the app", "we need to support Y"), set category "prd_update", fill prd hints as usual, and set alsoCreateTicket to true so a draft ticket is created after the doc update.
+Extract file or component name hints: for prd_update, add fileHints whenever the request touches specific code, features, or paths so the doc can be grounded in repo search.`;
 
 const draftPrompt = `You are a product manager. Given intent, the root PRD (if any), and any code context snippets, output JSON with title, description (markdown, include file refs as path:line), fileRefs, acceptance (strings), assigneeHint (optional, name only). Return JSON only.`;
 
@@ -64,7 +66,6 @@ export async function runExplore(
 ): Promise<{ path: string; line: number; text: string; excerpt?: string }[]> {
 	if (!intent.fileHints.length) return [];
 	const backend = getCodeBackend();
-	const { projectRoot } = isCodeBackendBridge() ? { projectRoot: '' } : getProjectPaths();
 	const all: { path: string; line: number; text: string; excerpt?: string }[] = [];
 	for (const hint of intent.fileHints.slice(0, 4)) {
 		const q = hint.replace(/[^a-zA-Z0-9/_\-.]/g, ' ').trim();
@@ -74,9 +75,7 @@ export async function runExplore(
 			let excerpt: string | undefined;
 			try {
 				const rel = h.path;
-				const full = isCodeBackendBridge()
-					? await backend.readFile(rel)
-					: readScopedFile(projectRoot, rel);
+				const full = await backend.readFile(rel);
 				const lineIdx = h.line - 1;
 				const lns = full.split('\n');
 				excerpt = lns
@@ -101,7 +100,11 @@ export async function runDraft(
 	rg: { path: string; line: number; text: string; excerpt?: string }[],
 	sessionId: string
 ): Promise<DraftTicket | null> {
-	if (intent.category !== 'ticket' && intent.category !== 'unclear') return null;
+	const allowDraft =
+		intent.category === 'ticket' ||
+		intent.category === 'unclear' ||
+		(intent.category === 'prd_update' && intent.alsoCreateTicket);
+	if (!allowDraft) return null;
 	publish({ type: 'agent_trace', phase: 'draft', detail: 'Composing ticket', sessionId });
 	const model = getChatModel();
 	let prdExcerpt = '';

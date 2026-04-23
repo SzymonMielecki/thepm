@@ -1,9 +1,10 @@
-import { randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { WebSocket, type RawData } from 'ws';
 import type { WebSocket as WsType } from 'ws';
 import type { CodeOpName, CodeReqMessage, CodeResMessage } from './protocol';
 
 const DEFAULT_CALL_MS = 60_000;
+const BRIDGE_UI_SESSION_TTL_MS = 8 * 60 * 60 * 1000;
 
 type Pending = {
 	complete: (v: CodeResMessage) => void;
@@ -17,10 +18,14 @@ type BridgeEntry = {
 	lastLabel?: string;
 	prdPath?: string;
 	projectRoot?: string;
+	accessToken?: string;
 };
 
 const bridges = new Map<string, BridgeEntry>();
 const pending = new Map<string, Pending>();
+type BridgeUiSession = { workspaceId: string; token: string; expiresAt: number };
+const bridgeUiSessionsByWorkspace = new Map<string, BridgeUiSession>();
+const bridgeUiSessionsByToken = new Map<string, BridgeUiSession>();
 
 function safeSend(ws: WsType, obj: object) {
 	if (ws.readyState !== WebSocket.OPEN) {
@@ -37,8 +42,8 @@ function safeSend(ws: WsType, obj: object) {
 export function registerBridgeConnection(
 	workspaceId: string,
 	ws: WsType,
-	opts?: { clientLabel?: string; prdPath?: string; projectRoot?: string }
-) {
+	opts?: { clientLabel?: string; prdPath?: string; projectRoot?: string; accessToken?: string }
+): BridgeUiSession {
 	const old = bridges.get(workspaceId);
 	if (old && old.ws !== ws) {
 		try {
@@ -51,8 +56,10 @@ export function registerBridgeConnection(
 		ws,
 		lastLabel: opts?.clientLabel,
 		prdPath: opts?.prdPath,
-		projectRoot: opts?.projectRoot
+		projectRoot: opts?.projectRoot,
+		accessToken: opts?.accessToken
 	});
+	return issueBridgeUiSession(workspaceId);
 }
 
 /** Active bridge client paths (from last `bridge_hello`) for a workspace, if connected. */
@@ -70,12 +77,59 @@ export function unregisterBridgeConnection(workspaceId: string, ws: WsType) {
 	if (cur?.ws === ws) {
 		bridges.delete(workspaceId);
 	}
+	clearBridgeUiSession(workspaceId);
 	for (const [id, p] of [...pending]) {
 		if (p.workspaceId !== workspaceId) continue;
 		p.complete({ type: 'code_res', id, ok: false, error: 'Bridge connection closed' });
 		clearTimeout(p.timer);
 		pending.delete(id);
 	}
+}
+
+function clearBridgeUiSession(workspaceId: string) {
+	const cur = bridgeUiSessionsByWorkspace.get(workspaceId);
+	if (!cur) return;
+	bridgeUiSessionsByWorkspace.delete(workspaceId);
+	bridgeUiSessionsByToken.delete(cur.token);
+}
+
+function sessionActive(s: BridgeUiSession): boolean {
+	if (Date.now() >= s.expiresAt) {
+		clearBridgeUiSession(s.workspaceId);
+		return false;
+	}
+	const bridge = bridges.get(s.workspaceId);
+	return !!bridge && bridge.ws.readyState === WebSocket.OPEN;
+}
+
+export function issueBridgeUiSession(workspaceId: string): BridgeUiSession {
+	clearBridgeUiSession(workspaceId);
+	const s: BridgeUiSession = {
+		workspaceId,
+		token: randomBytes(24).toString('base64url'),
+		expiresAt: Date.now() + BRIDGE_UI_SESSION_TTL_MS
+	};
+	bridgeUiSessionsByWorkspace.set(workspaceId, s);
+	bridgeUiSessionsByToken.set(s.token, s);
+	return s;
+}
+
+export function isBridgeUiSessionTokenValid(token: string | null | undefined): boolean {
+	const t = (token ?? '').trim();
+	if (!t) return false;
+	const s = bridgeUiSessionsByToken.get(t);
+	if (!s) return false;
+	if (!sessionActive(s)) return false;
+	return true;
+}
+
+export function bridgeUiSessionForWorkspace(
+	workspaceId: string
+): { token: string; expiresAt: number } | null {
+	const s = bridgeUiSessionsByWorkspace.get(workspaceId);
+	if (!s) return null;
+	if (!sessionActive(s)) return null;
+	return { token: s.token, expiresAt: s.expiresAt };
 }
 
 function parseJson(data: RawData): unknown {
@@ -115,7 +169,7 @@ export async function callBridge(
 	const entry = bridges.get(workspaceId);
 	if (!entry || entry.ws.readyState !== WebSocket.OPEN) {
 		throw new Error(
-			'Code bridge is not connected. Run `thepm-bridge` with the required flags (see `thepm-bridge --help`), or set CODE_BACKEND=local on the hub.'
+			'Code bridge is not connected. Run `thepm bridge` with the required flags (see `thepm bridge --help`).'
 		);
 	}
 	const id = randomUUID();
@@ -148,6 +202,27 @@ export function isBridgeConnected(workspaceId: string): boolean {
 	return !!e && e.ws.readyState === WebSocket.OPEN;
 }
 
+export function isBridgeAccessTokenValid(token: string | null | undefined): boolean {
+	const t = (token ?? '').trim();
+	if (!t) return false;
+	for (const entry of bridges.values()) {
+		if (entry.ws.readyState !== WebSocket.OPEN) continue;
+		if (entry.accessToken && entry.accessToken === t) return true;
+	}
+	return false;
+}
+
 export function getBridgeCount(): number {
 	return bridges.size;
+}
+
+/** @internal tests */
+export function _resetBridgeRegistryForTests() {
+	for (const p of pending.values()) {
+		clearTimeout(p.timer);
+	}
+	pending.clear();
+	bridges.clear();
+	bridgeUiSessionsByToken.clear();
+	bridgeUiSessionsByWorkspace.clear();
 }

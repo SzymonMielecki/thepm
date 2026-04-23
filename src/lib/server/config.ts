@@ -1,29 +1,71 @@
+import { createHash } from 'node:crypto';
 import { resolve, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-export type LlmProvider = 'anthropic' | 'openai' | 'ollama';
+const HUB_TOKEN_DERIVE_PREFIX = 'thepm:hubToken:v1:';
+
+function hubTokenAutoDisabled(): boolean {
+	const a = (process.env.HUB_TOKEN_AUTO ?? '').toLowerCase().trim();
+	return a === '0' || a === 'false' || a === 'off' || a === 'no';
+}
 
 /**
- * - `local` (default): read/search repo in-process (same machine as the hub).
- * - `bridge`: code ops and PRD file live on a connected `thepm-bridge` (outbound WSS to this hub). Required for a cloud hub to see a developer’s machine.
+ * Stable token for a project directory so the same repo always gets the same HUB_TOKEN
+ * without checking secrets into the hub install. Do not use on hostile networks; set HUB_TOKEN explicitly instead.
  */
-export type CodeBackendMode = 'local' | 'bridge';
+export function deriveHubTokenForProjectRoot(projectRoot: string): string {
+	const normalized = resolve(projectRoot);
+	return createHash('sha256')
+		.update(HUB_TOKEN_DERIVE_PREFIX + normalized, 'utf8')
+		.digest('base64url');
+}
+
+export type LlmProvider = 'anthropic' | 'openai' | 'ollama';
+
+export type BridgePrdBootstrapMode = 'if_empty' | 'always' | 'off';
+
+function parseBridgePrdBootstrap(raw: string | undefined): BridgePrdBootstrapMode {
+	const s = (raw || 'if_empty').toLowerCase().trim();
+	if (s === 'off' || s === '0' || s === 'false' || s === 'no') return 'off';
+	if (s === 'always' || s === 'all' || s === '1' || s === 'true' || s === 'yes') return 'always';
+	return 'if_empty';
+}
+
+export type HubTokenMode = 'explicit' | 'derived' | 'open';
 
 export function getEnv() {
 	const ollamaBase = (process.env.OLLAMA_BASE_URL || 'http://127.0.0.1:11434').trim().replace(/\/$/, '');
-	const codeBackendRaw = (process.env.CODE_BACKEND || 'local').toLowerCase().trim();
-	const codeBackend: CodeBackendMode = codeBackendRaw === 'bridge' ? 'bridge' : 'local';
+	const base = projectBaseDir();
+	const explicit = (process.env.HUB_TOKEN ?? '').trim();
+	let hubToken: string;
+	let hubTokenMode: HubTokenMode;
+	if (explicit) {
+		hubToken = explicit;
+		hubTokenMode = 'explicit';
+	} else if (hubTokenAutoDisabled()) {
+		hubToken = '';
+		hubTokenMode = 'open';
+	} else {
+		hubToken = deriveHubTokenForProjectRoot(base);
+		hubTokenMode = 'derived';
+	}
 	return {
 		nodeEnv: process.env.NODE_ENV ?? 'development',
 		port: Number(process.env.PORT) || 3000,
 		host: process.env.HOST ?? '0.0.0.0',
-		codeBackend,
-		/** When CODE_BACKEND=bridge, only this workspace’s bridge is used (default: `default`). */
+		/** Single bridge workspace used by this hub (default: `default`). */
 		codeBridgeWorkspaceId: (process.env.CODE_BRIDGE_WORKSPACE_ID || 'default').trim() || 'default',
-		/** HMAC or shared token for WS + SSE + MCP */
-		hubToken: process.env.HUB_TOKEN?.trim() || '',
+		/**
+		 * When the code bridge connects: `if_empty` (default) = generate PRD only if PRD.md is empty or the default stub;
+		 * `always` = always overwrite; `off` = never auto-generate.
+		 */
+		/** `PRD_BOOTSTRAP` (preferred) or `BRIDGE_PRD_BOOTSTRAP` — both local and bridge auto-PRD. */
+		bridgePrdBootstrap: parseBridgePrdBootstrap(process.env.PRD_BOOTSTRAP || process.env.BRIDGE_PRD_BOOTSTRAP),
+		/** Shared token for WS + SSE; or derived from project path when unset (see HUB_TOKEN_AUTO). */
+		hubToken,
+		hubTokenMode,
 		llmProvider: (process.env.LLM_PROVIDER as LlmProvider) || 'anthropic',
 		anthropicApiKey: process.env.ANTHROPIC_API_KEY?.trim(),
 		openaiApiKey: process.env.OPENAI_API_KEY?.trim(),
@@ -34,12 +76,21 @@ export function getEnv() {
 		linearTeamId: process.env.LINEAR_TEAM_ID?.trim(),
 		/** Non-realtime default; Realtime WebSocket forces `scribe_v2_realtime` in `realtimeSttQuery()`. */
 		elevenlabsSttModel: (process.env.ELEVENLABS_STT_MODEL || 'scribe_v2_realtime').trim(),
-		databasePath: process.env.DATABASE_PATH || join(process.cwd(), 'data', 'app.db')
+		/** Set by `thepm` / `thepm-bridge` wrappers; falls back to cwd. */
+		databasePath: process.env.DATABASE_PATH || join(base, 'data', 'app.db')
 	};
 }
 
+/**
+ * When set by `bin/thepm.mjs`, `THEPM_INVOCATION_CWD` wins so the derived HUB_TOKEN and
+ * local repo path match the directory where the command was run, not a `PROJECT_ROOT` from the install `.env`.
+ */
+export function projectBaseDir(): string {
+	return resolve(process.env.THEPM_INVOCATION_CWD || process.env.PROJECT_ROOT || process.cwd());
+}
+
 export function getProjectPaths() {
-	const projectRoot = resolve(process.env.PROJECT_ROOT || process.cwd());
+	const projectRoot = projectBaseDir();
 	const prdPath = resolve(projectRoot, process.env.PRD_PATH || 'PRD.md');
 	return { projectRoot, prdPath };
 }

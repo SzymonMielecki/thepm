@@ -7,5 +7,5 @@ node_modules
 !.env.example
 .env.local
 *.log
-data/*.db
+data
 .cursor

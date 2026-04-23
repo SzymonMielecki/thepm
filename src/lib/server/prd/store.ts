@@ -8,7 +8,7 @@ import { getEnv, getProjectPaths } from '../config';
 import { diffLines } from 'diff';
 
 function isPrdFileOnBridge(): boolean {
-	return getEnv().codeBackend === 'bridge';
+	return true;
 }
 
 let prdPathGlobal = '';
@@ -143,7 +143,7 @@ export function getPrdPath() {
 
 export function readPrd() {
 	if (isPrdFileOnBridge()) {
-		throw new Error('readPrd() is not available when CODE_BACKEND=bridge; use readPrdForHub()');
+		throw new Error('readPrd() is not available in bridge-backed mode; use readPrdForHub()');
 	}
 	return getPrdContent(getPrdPath());
 }
@@ -156,22 +156,14 @@ export function invalidatePrdReadCache() {
 	prdReadCache = null;
 }
 
-/**
- * Works in local and bridge mode (file content comes from the bridge when configured).
- * Uses a brief cache to avoid duplicate bridge round-trips in the same STT-tick.
- */
+/** Reads PRD via bridge and caches briefly to avoid duplicate round-trips in one STT tick. */
 export async function readPrdForHub(): Promise<string> {
 	const now = Date.now();
 	if (prdReadCache && now - prdReadCache.t < PRD_READ_TTL_MS) {
 		return prdReadCache.text;
 	}
-	let text: string;
-	if (isPrdFileOnBridge()) {
-		const { getCodeBackend } = await import('../code-bridge/code-backend');
-		text = await getCodeBackend().readPrd();
-	} else {
-		text = readPrd();
-	}
+	const { getCodeBackend } = await import('../code-bridge/code-backend');
+	const text = await getCodeBackend().readPrd();
 	prdReadCache = { text, t: now };
 	return text;
 }
@@ -214,25 +206,16 @@ export async function applyPrdPatch(
 	section: string,
 	newBody: string
 ) {
-	if (isPrdFileOnBridge()) {
-		const { getCodeBackend } = await import('../code-bridge/code-backend');
-		const b = getCodeBackend();
-		const r = await b.prdPatch(section, newBody);
-		if (!r.ok) {
-			return { ok: false as const, error: r.error };
-		}
-		const { before, after } = r;
-		const short = revisionSummary(before, after);
-		writePrdWithRevision(db, sessionId, short, before, after, { skipFileWrite: true });
-		return { ok: true as const, content: r.content };
+	const { getCodeBackend } = await import('../code-bridge/code-backend');
+	const b = getCodeBackend();
+	const r = await b.prdPatch(section, newBody);
+	if (!r.ok) {
+		return { ok: false as const, error: r.error };
 	}
-	const before = readPrd();
-	const r = patchSection(before, section, newBody);
-	if (!r.ok) return r;
-	const after = r.out;
+	const { before, after } = r;
 	const short = revisionSummary(before, after);
-	writePrdWithRevision(db, sessionId, short, before, after);
-	return { ok: true as const, content: after };
+	writePrdWithRevision(db, sessionId, short, before, after, { skipFileWrite: true });
+	return { ok: true as const, content: r.content };
 }
 
 export async function writeFullPrd(
@@ -240,20 +223,14 @@ export async function writeFullPrd(
 	sessionId: string | null,
 	content: string
 ) {
-	if (isPrdFileOnBridge()) {
-		const { getCodeBackend } = await import('../code-bridge/code-backend');
-		const b = getCodeBackend();
-		const w = await b.prdWriteFull(content);
-		if (w.skipped) {
-			return { ok: true as const, content: w.after };
-		}
-		const short = 'full edit';
-		writePrdWithRevision(db, sessionId, short, w.before, w.after, { skipFileWrite: true });
+	const { getCodeBackend } = await import('../code-bridge/code-backend');
+	const b = getCodeBackend();
+	const w = await b.prdWriteFull(content);
+	if (w.skipped) {
 		return { ok: true as const, content: w.after };
 	}
-	const before = readPrd();
-	if (before === content) return { ok: true as const, content };
-	writePrdWithRevision(db, sessionId, 'full edit', before, content);
-	return { ok: true as const, content };
+	const short = 'full edit';
+	writePrdWithRevision(db, sessionId, short, w.before, w.after, { skipFileWrite: true });
+	return { ok: true as const, content: w.after };
 }
 

@@ -1,6 +1,6 @@
-# Always-On AI Product Manager
+# thepm
 
-Local-first SvelteKit hub: **dashboard** at `/`, **mobile PWA** at `/mobile`, **MCP** at `/api/mcp`, **SSE** at `/api/events`, and **WebSocket audio** at `/api/audio/stream`.
+Bridge-backed SvelteKit hub: **dashboard** at `/`, **mobile PWA** at `/mobile`, **SSE** at `/api/events`, and **WebSocket audio** at `/api/audio/stream`. All of that (including the mobile PWA) is served by the **same Node process** when you run `npm start` or the `thepm` CLI — there is no separate mobile host.
 
 ## Troubleshooting: `better-sqlite3` (“Could not locate the bindings file”)
 
@@ -30,16 +30,50 @@ npm install
 npm run dev
 ```
 
-Open [http://localhost:5173](http://localhost:5173). Set **HUB_TOKEN** in the UI (or leave empty if `HUB_TOKEN` is unset in `.env`) and use **Reconnect SSE** after changing the token.
+Open [http://localhost:5173](http://localhost:5173). Run `thepm bridge` from the target repo, then either open the printed `bridge_session` URL or paste the printed bridge token into the hub UI.
 
-Production (custom `server.ts` attaches the audio WebSocket):
+Production (custom `server.ts` attaches the audio WebSocket; this process **hosts** the web UI and `/mobile`):
 
 ```bash
 npm run build
 npm start
+# or: pnpm thepm
 ```
 
-Default URL: `http://0.0.0.0:3000`.
+Default URL: `http://0.0.0.0:3000`. The [`bin/thepm.mjs`](./bin/thepm.mjs) entry is the same runner (`pnpm thepm` = `node --import tsx server.ts`). Run `pnpm thepm bridge` from the target repository so the hub can access files and `PRD.md` (see [`packages/bridge/README.md`](./packages/bridge/README.md)).
+
+### Run it outside this repo (or from any working directory)
+
+The hub is **one installed tree** (built `build/`, `node_modules/`, `server.ts`, and `src/` for `tsx`). It does not need to live in your *application* project.
+
+`thepm` starts the hub process. To expose a specific repository, run [`thepm bridge`](./packages/bridge/README.md) from that repo with `--hub-url`, `--project-root`, `--prd`, and `--workspace` (plus optional `--token`). If `--token` is omitted, the bridge generates a UUID token for that connection. The bridge process is the only code/PRD backend.
+Each bridge connection prints:
+- short-lived dashboard/mobile links with `bridge_session` query parameters, and
+- dashboard/mobile links with `?token=...` for direct token prefill in the hub UI.
+If `--token` was omitted, the printed token URL uses the generated UUID token for that connection.
+
+Local dev example (hub running at `http://127.0.0.1:5173`):
+
+```bash
+thepm bridge \
+  --hub-url http://127.0.0.1:5173 \
+  --project-root . \
+  --prd PRD.md \
+  --workspace default
+```
+
+The hub and bridge are scoped as:
+- **One hub instance = one project/repository context**
+- **Many `/mobile` clients** can connect to that same hub/project
+
+| Approach | You need on disk at runtime |
+|----------|-----------------------------|
+| **Docker** | No git checkout: build the image (or use a prebuilt one), `docker run -p 3000:3000 -v …` with env. See the [`Dockerfile`](./Dockerfile) header comment. |
+| **Install in a fixed path** | Clone the hub once to e.g. `/opt/thepm`, then `pnpm install && pnpm build`, copy `.env`, `cd` to your app repo and run `thepm` (or set `PROJECT_ROOT` in `.env`). |
+| **Global CLI** | From a clone: `pnpm link -g` (or `npm link`) so `thepm` is on your `PATH`. Run it from the **application** directory you want to manage; `thepm` still resolves runtime files from the linked install. |
+| **Loose `bin/thepm.mjs` only** | Set **`THEPM_ROOT`** to the **absolute** path of a full install (same as above). The wrapper in [`bin/thepm.mjs`](./bin/thepm.mjs) uses it when the script is not next to the rest of the package. |
+
+There is no published `npm i -g` for this `private` package today; for “no copy of the app code,” use **Docker** or a private registry + global install of your own image.
 
 ## Environment variables
 
@@ -51,13 +85,23 @@ Important:
 
 | Variable | Purpose |
 |----------|---------|
-| `HUB_TOKEN` | Optional shared secret. If set, required on `Authorization: Bearer`, `?token=`, `X-Hub-Token`, WebSocket query, and MCP. |
+| `HUB_TOKEN` | Optional legacy static token. In bridge-first flow, use per-connection bridge tokens generated/provided by `thepm bridge` instead of storing a shared token in `.env`. |
+| `HUB_TOKEN_AUTO` | Legacy derived-token toggle. Bridge-first flow does not depend on this setting. |
 | `LLM_PROVIDER` | `anthropic` or `openai` |
 | `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` | LLM for LangGraph (intent, ticket draft) |
 | `ELEVENLABS_API_KEY` | Streaming STT; override `ELEVENLABS_STT_URL` if your product uses a different WebSocket URL |
 | `LINEAR_API_KEY` / `LINEAR_TEAM_ID` | Create issues when you **Approve** a draft |
-| `PROJECT_ROOT` | Root for `read_file`, `ripgrep`, `list_dir` (defaults to cwd) |
-| `PRD_PATH` | Path to root document (default `PRD.md` under `PROJECT_ROOT`) |
+| `PROJECT_ROOT` | Root for hub-local defaults (token derivation and fallback path metadata). The bridge still controls real code/PRD access for operations. |
+| `PRD_PATH` | Path to root document (default `PRD.md` under the resolved project root) |
+| `PRD_BOOTSTRAP` (alias: `BRIDGE_PRD_BOOTSTRAP`) | After a bridge connects, the hub can **write PRD.md** from a repo scan (`if_empty` = only when the file is missing or the default stub; `always` = overwrite; `off` = never). |
+| `THEPM_INVOCATION_CWD` | Set by [`bin/thepm.mjs`](./bin/thepm.mjs) to the directory where you ran the command. Takes precedence over `PROJECT_ROOT` defaults. |
+
+## Microphone on a phone (LAN vs HTTPS)
+
+Browsers only grant **getUserMedia** in **secure contexts** (HTTPS, or `http://localhost`). So:
+
+- **On the same machine:** open `http://127.0.0.1:<PORT>/mobile` (see `[hub] Mobile PWA` in the server log after `thepm` / `npm start`).
+- **On another device (LAN):** use the **On LAN (device)** lines printed at startup, or use **Tailscale Funnel** / another HTTPS edge so the phone loads **HTTPS** (plain `http://<lan-ip>:3000` may block the mic). The WebSocket for streaming audio upgrades on the same origin: `ws://…/api/audio/stream` (or `wss://` with HTTPS). Use the same active bridge token (or the same `bridge_session` URL flow) on phone and desktop.
 
 ## Tailscale Funnel (HTTPS for the PWA mic)
 
@@ -84,15 +128,7 @@ If the URL returns **“unable to handle this request”** or **502** / connecti
 - First-time Funnel: enable it for your tailnet (the `tailscale funnel` success message may link to [admin console](https://login.tailscale.com) → Funnel on).
 - Ensure Tailscale is up: `tailscale status`.
 
-Use the printed `https://…ts.net` URL on the phone (HTTPS lets the browser allow the microphone). Set the same `HUB_TOKEN` on the mobile page and desktop if you use one.
-
-## MCP (Cursor, etc.)
-
-Endpoint: **`POST` / `GET` / `DELETE` `https://<host>/api/mcp`** (Streamable HTTP via `@modelcontextprotocol/sdk`).
-
-Tools: `read_file`, `list_dir`, `ripgrep`, `prd_read`, `prd_patch`, `list_tickets`.
-
-If `HUB_TOKEN` is set, send it as `Authorization: Bearer <token>` or `?token=`.
+Use the printed `https://…ts.net` URL on the phone (HTTPS lets the browser allow the microphone). Use the same active bridge token on the mobile page and desktop (or open the bridge-provided `bridge_session` URL on each).
 
 ## Development notes
 

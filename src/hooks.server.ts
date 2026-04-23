@@ -3,6 +3,9 @@ import { getOrCreateDatabase } from '$lib/server/db';
 import { initPrdStore } from '$lib/server/prd/store';
 import { getProjectPaths } from '$lib/server/config';
 import { initAgent } from '$lib/server/agent/graph';
+import { isBridgeUiSessionTokenValid } from '$lib/server/code-bridge/bridge-registry';
+
+const BRIDGE_SESSION_COOKIE = 'thepm_bridge_session';
 
 let ready = false;
 function boot() {
@@ -18,6 +21,31 @@ export const handle = async ({ event, resolve }) => {
 	// Browsers request /favicon.ico by default; do not require SQLite for that.
 	if (event.url.pathname === '/favicon.ico') {
 		return resolve(event);
+	}
+	const qsBridgeSession = event.url.searchParams.get('bridge_session')?.trim();
+	if (qsBridgeSession) {
+		if (isBridgeUiSessionTokenValid(qsBridgeSession)) {
+			event.cookies.set(BRIDGE_SESSION_COOKIE, qsBridgeSession, {
+				path: '/',
+				httpOnly: true,
+				sameSite: 'lax',
+				secure: event.url.protocol === 'https:'
+			});
+			event.locals.bridgeSessionActive = true;
+		} else {
+			event.cookies.delete(BRIDGE_SESSION_COOKIE, { path: '/' });
+			event.locals.bridgeSessionActive = false;
+		}
+	} else {
+		const cookieBridgeSession = event.cookies.get(BRIDGE_SESSION_COOKIE)?.trim();
+		if (cookieBridgeSession && isBridgeUiSessionTokenValid(cookieBridgeSession)) {
+			event.locals.bridgeSessionActive = true;
+		} else {
+			if (cookieBridgeSession) {
+				event.cookies.delete(BRIDGE_SESSION_COOKIE, { path: '/' });
+			}
+			event.locals.bridgeSessionActive = false;
+		}
 	}
 	boot();
 	event.locals.db = getOrCreateDatabase();

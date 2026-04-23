@@ -16,13 +16,9 @@ export const GET = async (event: RequestEvent) => {
 	try {
 		const content = await readPrdForHub();
 		const env = getEnv();
-		const source = env.codeBackend;
 		const bridge = getBridgeClientPaths(env.codeBridgeWorkspaceId);
-		const prdFilePath =
-			source === 'bridge' && bridge
-				? bridge.prdPath
-				: getProjectPaths().prdPath;
-		return json({ content, source, prdFilePath });
+		const prdFilePath = bridge ? bridge.prdPath : getProjectPaths().prdPath;
+		return json({ content, source: 'bridge', prdFilePath });
 	} catch (e) {
 		const msg = (e as Error).message;
 		return new Response(

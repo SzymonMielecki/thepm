@@ -1,18 +1,17 @@
-import { getEnv } from '$lib/server/config';
-import { ensureRipgrep } from '$lib/server/ripgrep';
-import { isCodeBackendBridge, isBridgeReady } from '$lib/server/code-bridge/code-backend';
+import { getEnv, type HubTokenMode } from '$lib/server/config';
+import { isBridgeReady } from '$lib/server/code-bridge/code-backend';
+import type { PageServerLoad } from './$types';
 
-export const load = async () => {
-	let ripgrepOk = true;
-	try {
-		if (isCodeBackendBridge()) {
-			ripgrepOk = isBridgeReady();
-		} else {
-			await ensureRipgrep();
-		}
-	} catch {
-		ripgrepOk = false;
-	}
+type IndexPageData = {
+	hubToken: string;
+	hubTokenMode: HubTokenMode;
+	bridgeReady: boolean;
+	bridgeSessionActive: boolean;
+	flags: { eleven: boolean; linear: boolean; llm: boolean; ripgrep: boolean };
+};
+
+export const load: PageServerLoad = async ({ locals }): Promise<IndexPageData> => {
+	const ripgrepOk = isBridgeReady();
 	const e = getEnv();
 	const hasLlm =
 		e.llmProvider === 'ollama'
@@ -21,8 +20,10 @@ export const load = async () => {
 				? !!e.openaiApiKey
 				: !!e.anthropicApiKey;
 	return {
-		hubToken: e.hubToken || '',
-		codeBackend: e.codeBackend,
+		hubToken: '',
+		hubTokenMode: 'open',
+		bridgeReady: ripgrepOk,
+		bridgeSessionActive: !!locals.bridgeSessionActive,
 		flags: {
 			eleven: !!e.elevenlabsApiKey,
 			linear: !!e.linearApiKey,

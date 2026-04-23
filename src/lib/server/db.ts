@@ -1,14 +1,20 @@
 import Database from 'better-sqlite3';
 import { mkdirSync, readFileSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { dirname, join } from 'node:path';
 import { getEnv } from './config';
 
 export type AppDatabase = Database.Database;
 
 let dbInstance: AppDatabase | null = null;
 
+function readMigration001Sql(): string {
+	/** Hub runs with install root as `process.cwd()` (`bin/thepm.mjs`); bundled chunks break `import.meta.url` relatives. */
+	const p = join(process.cwd(), 'src', 'lib', 'server', 'migrations', '001_init.sql');
+	return readFileSync(p, 'utf-8');
+}
+
 function runMigrations(db: AppDatabase) {
-	const sql = readFileSync(new URL('./migrations/001_init.sql', import.meta.url), 'utf-8');
+	const sql = readMigration001Sql();
 	db.exec('BEGIN');
 	try {
 		db.exec(sql);

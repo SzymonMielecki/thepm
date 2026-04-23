@@ -2,18 +2,15 @@ import { getEnv } from '../config';
 import { getProjectPaths } from '../config';
 import type { RipgrepResult } from '../ripgrep';
 import { callBridge, isBridgeConnected } from './bridge-registry';
-import { executeCodeOp, type CodeBridgeContext } from './execute-op';
 import { isPrdPatchBridgeResult, type PrdPatchBridgeResult } from './protocol';
 import type { CodeOpName } from './protocol';
 
 let cached: CodeBackend | null = null;
 
-export type CodeBackendMode = 'local' | 'bridge';
-
 export type CodeBackend = {
-	mode: CodeBackendMode;
+	mode: 'bridge';
 	workspaceId: string;
-	/** In-process: project root on this machine. In bridge: placeholder for display only. */
+	/** Hub-side default path metadata; file ops are executed by the connected bridge. */
 	projectRoot: string;
 	prdPath: string;
 	readFile(relPath: string): Promise<string>;
@@ -26,51 +23,6 @@ export type CodeBackend = {
 	prdPatch(section: string, newBody: string): Promise<PrdPatchBridgeResult | { ok: false; error: string }>;
 	prdWriteFull(content: string): Promise<{ before: string; after: string; skipped?: boolean }>;
 };
-
-function ctxForLocal(): CodeBridgeContext {
-	const { projectRoot, prdPath } = getProjectPaths();
-	return { projectRoot, prdPath };
-}
-
-function createLocal(): CodeBackend {
-	const { projectRoot, prdPath } = getProjectPaths();
-	const ctx = () => ctxForLocal();
-	return {
-		mode: 'local',
-		workspaceId: 'local',
-		projectRoot,
-		prdPath,
-		readFile: (rel) => executeCodeOp(ctx(), 'read_file', { path: rel }) as Promise<string>,
-		listDir: (rel) => executeCodeOp(ctx(), 'list_dir', { path: rel ?? '' }) as Promise<
-			{ name: string; isDir: boolean }[]
-		>,
-		ripgrep: async (pattern, options) => {
-			const r = (await executeCodeOp(ctx(), 'ripgrep', {
-				pattern,
-				subpath: options?.subpath,
-				max: options?.max
-			})) as { hits: RipgrepResult[] };
-			return r.hits;
-		},
-		readPrd: () => executeCodeOp(ctx(), 'prd_read', {}) as Promise<string>,
-		prdPatch: async (section, newBody) => {
-			const r = (await executeCodeOp(ctx(), 'prd_patch', { section, newBody })) as unknown;
-			if (isPrdPatchBridgeResult(r)) {
-				return r;
-			}
-			if (r && typeof r === 'object' && 'ok' in r && (r as { ok: boolean }).ok === false) {
-				return { ok: false, error: String((r as { error?: string }).error ?? 'prd_patch failed') };
-			}
-			return { ok: false, error: 'Invalid prd_patch result' };
-		},
-		prdWriteFull: (content) =>
-			executeCodeOp(ctx(), 'prd_write_full', { content }) as Promise<{
-				before: string;
-				after: string;
-				skipped?: boolean;
-			}>
-	};
-}
 
 function createBridge(workspaceId: string): CodeBackend {
 	const { projectRoot, prdPath } = getProjectPaths();
@@ -124,11 +76,7 @@ async function callFor(
 export function getCodeBackend(): CodeBackend {
 	if (cached) return cached;
 	const env = getEnv();
-	if (env.codeBackend === 'bridge') {
-		cached = createBridge(env.codeBridgeWorkspaceId);
-	} else {
-		cached = createLocal();
-	}
+	cached = createBridge(env.codeBridgeWorkspaceId);
 	return cached;
 }
 
@@ -137,18 +85,10 @@ export function _resetCodeBackendForTests() {
 	cached = null;
 }
 
-export function isCodeBackendBridge(): boolean {
-	return getEnv().codeBackend === 'bridge';
-}
-
 export function getCodeBackendWorkspaceId(): string {
 	return getEnv().codeBridgeWorkspaceId;
 }
 
 export function isBridgeReady(): boolean {
-	const env = getEnv();
-	if (env.codeBackend !== 'bridge') {
-		return true;
-	}
-	return isBridgeConnected(env.codeBridgeWorkspaceId);
+	return isBridgeConnected(getEnv().codeBridgeWorkspaceId);
 }

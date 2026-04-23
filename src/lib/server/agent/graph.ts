@@ -107,7 +107,12 @@ function compile(_database: AppDatabase) {
 		{ prd: 'prd' as any, draft: 'draft' as any }
 	);
 	g.addEdge('draft' as any, 'end' as any);
-	g.addEdge('prd' as any, 'end' as any);
+	g.addConditionalEdges(
+		'prd' as any,
+		(st: S) =>
+			st.intent?.category === 'prd_update' && st.intent.alsoCreateTicket ? 'draft' : 'end',
+		{ draft: 'draft' as any, end: 'end' as any }
+	);
 	g.addEdge('end' as any, END);
 	compiled = g.compile() as { invoke: (x: S) => Promise<S> };
 }

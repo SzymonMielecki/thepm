@@ -1,6 +1,6 @@
 /**
  * When a reverse proxy (e.g. some Tailscale Funnel / Serve paths) strips `?token=`
- * from the WebSocket upgrade URL, the hub still needs the HUB_TOKEN. Browsers
+ * from the WebSocket upgrade URL, the hub still needs the bridge access token. Browsers
  * cannot set custom headers on the WS handshake; a subprotocol value is a
  * reliable way to pass it. Server: `xhub-` + base64url(UTF-8) in
  * `Sec-WebSocket-Protocol` — see `hubTokenFromBrowserUpgrade` in the server.

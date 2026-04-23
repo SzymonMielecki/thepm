@@ -1,13 +1,12 @@
 import { WebSocket, WebSocketServer } from 'ws';
 import type { IncomingMessage } from 'node:http';
 import type { Server } from 'node:http';
-import { isHubTokenValid } from '../auth';
-import { hubTokenFromBrowserUpgrade } from './hub-ws-auth';
 import {
 	registerBridgeConnection,
 	unregisterBridgeConnection,
 	handleBridgeIncomingRpcMessage
 } from '../code-bridge/bridge-registry';
+import { scheduleBridgePrdBootstrap } from '../prd/bridge-prd-bootstrap';
 import { z } from 'zod';
 
 const PATH = '/api/bridge';
@@ -31,9 +30,9 @@ function send(ws: WebSocket, obj: object) {
 
 export function handleBridgeSocket(ws: WebSocket, req: IncomingMessage) {
 	const u = new URL(req.url ?? '', 'http://x');
-	const token = (u.searchParams.get('token')?.trim() ?? '') || hubTokenFromBrowserUpgrade(req);
-	if (!isHubTokenValid(token)) {
-		ws.close(4001, 'HUB_TOKEN required');
+	const token = u.searchParams.get('token')?.trim() ?? '';
+	if (!token) {
+		ws.close(4001, 'bridge token required');
 		return;
 	}
 	const workspaceId = (u.searchParams.get('workspace') || 'default').trim() || 'default';
@@ -49,12 +48,20 @@ export function handleBridgeSocket(ws: WebSocket, req: IncomingMessage) {
 		st.projectRoot = p.data.PROJECT_ROOT;
 		st.prdPath = p.data.PRD_PATH;
 		st.ready = true;
-		registerBridgeConnection(st.workspaceId, ws, {
+		const uiSession = registerBridgeConnection(st.workspaceId, ws, {
 			clientLabel: st.projectRoot,
 			projectRoot: st.projectRoot,
-			prdPath: st.prdPath
+			prdPath: st.prdPath,
+			accessToken: token
 		});
-		send(ws, { type: 'bridge_ack', workspaceId: st.workspaceId, ok: true });
+		send(ws, {
+			type: 'bridge_ack',
+			workspaceId: st.workspaceId,
+			ok: true,
+			uiSessionToken: uiSession.token,
+			uiSessionExpiresAt: uiSession.expiresAt
+		});
+		scheduleBridgePrdBootstrap(st.workspaceId);
 	};
 
 	const tryConfig = (raw: string) => {
