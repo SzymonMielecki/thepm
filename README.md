@@ -2,6 +2,18 @@
 
 Local-first SvelteKit hub: **dashboard** at `/`, **mobile PWA** at `/mobile`, **MCP** at `/api/mcp`, **SSE** at `/api/events`, and **WebSocket audio** at `/api/audio/stream`.
 
+## Troubleshooting: `better-sqlite3` (“Could not locate the bindings file”)
+
+`better-sqlite3` ships a **native** addon. After **changing Node version**, a fresh `pnpm install` / `npm install`, or if pnpm **blocked** the build, you must compile it for your current runtime:
+
+```bash
+pnpm rebuild better-sqlite3
+# or: npm rebuild better-sqlite3
+# or:  cd node_modules/better-sqlite3 && npm run build-release
+```
+
+You need a normal native toolchain (on macOS: Xcode CLT, `python3` for `node-gyp`). **Node 25** can work but **Node 20 LTS** has the widest prebuilt support.
+
 ## Prerequisites
 
 - **Node.js** 20+
@@ -31,7 +43,11 @@ Default URL: `http://0.0.0.0:3000`.
 
 ## Environment variables
 
-See [`.env.example`](.env.example). Important:
+Copy [`.env.example`](.env.example) to **`.env`** in the project root. Values are loaded into `process.env` via [`dotenv`](https://github.com/motdotla/dotenv) from [`src/lib/server/load-dotenv.ts`](src/lib/server/load-dotenv.ts) (imported by Vite, `hooks.server.ts`, and `server.ts`). **`.env.local`** is also read and overrides `.env` (for machine-specific secrets).
+
+Restart the dev server after changing env files.
+
+Important:
 
 | Variable | Purpose |
 |----------|---------|
@@ -45,11 +61,30 @@ See [`.env.example`](.env.example). Important:
 
 ## Tailscale Funnel (HTTPS for the PWA mic)
 
+Funnel only **proxies** to your machine. You must (1) run the app in one terminal, and (2) run Funnel with the **same port** in another.
+
+| How you run the app | Funnel command |
+|---------------------|----------------|
+| `npm run dev` (Vite, default **5173**) | `tailscale funnel 5173` |
+| `npm run build && npm start` (Node, default **3000**) | `tailscale funnel 3000` |
+
 ```bash
-tailscale funnel 3000
+# Terminal A — the hub
+npm run dev
+# or: PORT=3000 npm start   # after build
+
+# Terminal B — expose HTTPS (Funnel must stay running)
+tailscale funnel 5173
 ```
 
-Use the printed `https://…` URL on the phone so the browser allows microphone access. Set the same `HUB_TOKEN` on the mobile page and desktop.
+If the URL returns **“unable to handle this request”** or **502** / connection errors:
+
+- Nothing is listening on the proxied port — start the app in Terminal A, or fix the Funnel port to match (see table).
+- Check locally: `curl -I http://127.0.0.1:5173` should return `200` or `302` from SvelteKit.
+- First-time Funnel: enable it for your tailnet (the `tailscale funnel` success message may link to [admin console](https://login.tailscale.com) → Funnel on).
+- Ensure Tailscale is up: `tailscale status`.
+
+Use the printed `https://…ts.net` URL on the phone (HTTPS lets the browser allow the microphone). Set the same `HUB_TOKEN` on the mobile page and desktop if you use one.
 
 ## MCP (Cursor, etc.)
 

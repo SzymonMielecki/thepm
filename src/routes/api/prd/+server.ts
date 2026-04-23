@@ -1,17 +1,41 @@
 import { json, type RequestEvent } from '@sveltejs/kit';
 import { assertHubToken } from '$lib/server/auth';
 import { error } from '@sveltejs/kit';
-import { readPrd, applyPrdPatch, writeFullPrd } from '$lib/server/prd/store';
+import { readPrdForHub, applyPrdPatch, writeFullPrd } from '$lib/server/prd/store';
 import { getOrCreateSessionId } from '$lib/server/session';
 import { getOrCreateDatabase } from '$lib/server/db';
+import { getEnv, getProjectPaths } from '$lib/server/config';
+import { getBridgeClientPaths } from '$lib/server/code-bridge/bridge-registry';
 
-export const GET = (event: RequestEvent) => {
+export const GET = async (event: RequestEvent) => {
 	try {
 		assertHubToken(event);
 	} catch {
 		return error(401, 'unauthorized');
 	}
-	return json({ content: readPrd() });
+	try {
+		const content = await readPrdForHub();
+		const env = getEnv();
+		const source = env.codeBackend;
+		const bridge = getBridgeClientPaths(env.codeBridgeWorkspaceId);
+		const prdFilePath =
+			source === 'bridge' && bridge
+				? bridge.prdPath
+				: getProjectPaths().prdPath;
+		return json({ content, source, prdFilePath });
+	} catch (e) {
+		const msg = (e as Error).message;
+		return new Response(
+			JSON.stringify({
+				error: 'prd_unavailable',
+				detail: msg
+			}),
+			{
+				status: 503,
+				headers: { 'content-type': 'application/json' }
+			}
+		);
+	}
 };
 
 export const POST = async (event: RequestEvent) => {
@@ -29,12 +53,12 @@ export const POST = async (event: RequestEvent) => {
 	const db = getOrCreateDatabase();
 	if (typeof b.fullContent === 'string') {
 		const sid = getOrCreateSessionId(db, b.sessionId);
-		const r = writeFullPrd(db, sid, b.fullContent);
+		const r = await writeFullPrd(db, sid, b.fullContent);
 		return json({ content: r.content });
 	}
 	if (!b.section || b.body == null) return error(400, 'section and body');
 	const sid = getOrCreateSessionId(db, b.sessionId);
-	const r = applyPrdPatch(db, sid, b.section, b.body);
+	const r = await applyPrdPatch(db, sid, b.section, b.body);
 	if (!r || !('ok' in r) || !r.ok) {
 		return error(400, 'patch failed');
 	}

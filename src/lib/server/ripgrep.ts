@@ -28,10 +28,11 @@ export async function ensureRipgrep(): Promise<void> {
  */
 export async function runRipgrep(
 	pattern: string,
-	options?: { max?: number; path?: string }
+	options?: { max?: number; path?: string; projectRoot?: string }
 ): Promise<RipgrepResult[]> {
 	await ensureRipgrep();
-	const { projectRoot } = getProjectPaths();
+	const { projectRoot: rootFromConfig } = getProjectPaths();
+	const projectRoot = options?.projectRoot ?? rootFromConfig;
 	const max = options?.max ?? 40;
 	const target = options?.path ?? '.';
 	const args = [

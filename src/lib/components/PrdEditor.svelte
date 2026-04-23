@@ -1,12 +1,17 @@
 <script lang="ts">
 	import { marked } from 'marked';
-	let { content = $bindable(''), proposed = $bindable('') } = $props();
+	let { content = $bindable(''), proposed = $bindable(''), pathLabel = '' } = $props();
 	const html = $derived(marked.parse(content || '') as string);
 </script>
 
 <div class="grid h-full min-h-0 grid-cols-1 gap-2 lg:grid-cols-2">
 	<div class="flex min-h-0 flex-col overflow-hidden rounded-lg border border-zinc-800">
-		<div class="border-b border-zinc-800 px-2 py-1.5 text-xs text-zinc-500">Source (PRD.md)</div>
+		<div
+			class="min-w-0 border-b border-zinc-800 px-2 py-1.5 text-xs break-all text-zinc-500"
+			title={pathLabel || undefined}
+		>
+			{pathLabel ? `PRD at ${pathLabel}` : 'Source (PRD.md)'}
+		</div>
 		<textarea
 			class="min-h-[200px] flex-1 resize-none bg-zinc-950 p-2 font-mono text-xs text-zinc-200 outline-none"
 			bind:value={content}></textarea>

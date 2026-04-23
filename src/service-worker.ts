@@ -16,6 +16,13 @@ self.addEventListener('activate', (event) => {
 });
 
 self.addEventListener('fetch', (event) => {
+	// Do not wrap `/api/*` in the service worker. Forwarding all GETs through
+	// `fetch` breaks EventSource (SSE) streaming, and in some cases interferes
+	// with the WebSocket upgrade handshake. Let those hit the network directly.
+	const url = new URL(event.request.url);
+	if (url.pathname.startsWith('/api/')) {
+		return;
+	}
 	if (event.request.method !== 'GET') return;
 	event.respondWith(
 		fetch(event.request).catch(() => caches.match(event.request).then((r) => r ?? new Response('offline', { status: 503 })))

@@ -1,4 +1,5 @@
 import { EventEmitter } from 'node:events';
+import type { CaptureClientInfo } from '../capture-types';
 
 export type TranscriptEvent = {
 	type: 'transcript';
@@ -15,16 +16,43 @@ export type AgentTraceEvent = {
 	sessionId?: string;
 };
 export type PrdProposedEvent = { type: 'prd_proposed'; section: string; body: string };
-export type SseEvent = TranscriptEvent | DraftEvent | PrdEvent | AgentTraceEvent | PrdProposedEvent;
+export type { CaptureClientInfo } from '../capture-types';
+export type CaptureDevicesEvent = { type: 'capture_devices'; devices: CaptureClientInfo[] };
+export type CaptureWaveformEvent = {
+	type: 'capture_waveform';
+	clientId: string;
+	sessionId: string;
+	/** ~0..1, length capped on server; bar graph on hub */
+	levels: number[];
+};
+export type SseEvent =
+	| TranscriptEvent
+	| DraftEvent
+	| PrdEvent
+	| AgentTraceEvent
+	| PrdProposedEvent
+	| CaptureDevicesEvent
+	| CaptureWaveformEvent;
 
-const emitter = new EventEmitter();
-emitter.setMaxListeners(200);
+const BUS_KEY = Symbol.for('thepm.hubEventBus');
+
+function getOrCreateBusEmitter() {
+	const g = globalThis as unknown as Record<symbol, EventEmitter | undefined>;
+	let e = g[BUS_KEY];
+	if (!e) {
+		e = new EventEmitter();
+		e.setMaxListeners(200);
+		g[BUS_KEY] = e;
+	}
+	return e;
+}
 
 export function getBus() {
-	return emitter;
+	return getOrCreateBusEmitter();
 }
 
 export function publish(event: SseEvent) {
+	const emitter = getOrCreateBusEmitter();
 	emitter.emit('event', event);
 	emitter.emit(event.type, event);
 }

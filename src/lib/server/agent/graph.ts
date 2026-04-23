@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import type { AppDatabase } from '../db';
 import { publish } from '../bus';
-import { runIntentOnText, runExplore, runDraft, persistDraft, applyPrdFromIntent } from './nodes';
+import { runIntentOnText, runExplore, runDraft, persistDraft, runPrdPatchFromContext } from './nodes';
 import { getEnv } from '../config';
-import { ensureRipgrep } from '../ripgrep';
+import { ensureCodeExploreReady } from './explore-preflight';
 import { StateGraph, END, START, Annotation } from '@langchain/langgraph';
 
 const State = Annotation.Root({
@@ -29,10 +29,10 @@ async function nodeIntent(s: S): Promise<Partial<S>> {
 	return { intent };
 }
 
-function routeAfterIntent(s: S): 'noise' | 'prd' | 'explore' | 'draft' {
+function routeAfterIntent(s: S): 'noise' | 'explore' | 'draft' {
 	const i = s.intent;
 	if (!i || i.category === 'noise') return 'noise';
-	if (i.category === 'prd_update') return 'prd';
+	if (i.category === 'prd_update') return 'explore';
 	if (i.fileHints.length) return 'explore';
 	if (i.category === 'ticket' || i.category === 'unclear') return 'draft';
 	return 'noise';
@@ -41,12 +41,28 @@ function routeAfterIntent(s: S): 'noise' | 'prd' | 'explore' | 'draft' {
 async function nodeExplore(s: S): Promise<Partial<S>> {
 	if (!s.intent) return { rg: [] };
 	try {
-		await ensureRipgrep();
-	} catch {
+		await ensureCodeExploreReady();
+	} catch (e) {
+		publish({
+			type: 'agent_trace',
+			phase: 'explore',
+			detail: (e as Error).message,
+			sessionId: s.sessionId
+		});
 		return { rg: [] };
 	}
-	const rg = await runExplore(s.intent, s.sessionId);
-	return { rg };
+	try {
+		const rg = await runExplore(s.intent, s.sessionId);
+		return { rg };
+	} catch (e) {
+		publish({
+			type: 'agent_trace',
+			phase: 'explore',
+			detail: (e as Error).message,
+			sessionId: s.sessionId
+		});
+		return { rg: [] };
+	}
 }
 
 async function nodeDraft(s: S): Promise<Partial<S>> {
@@ -60,7 +76,8 @@ async function nodeDraft(s: S): Promise<Partial<S>> {
 
 async function nodePrd(s: S): Promise<Partial<S>> {
 	if (!s.intent) return {};
-	applyPrdFromIntent(db(), s.sessionId, s.intent);
+	const rg = s.rg ?? [];
+	await runPrdPatchFromContext(s.utterance, s.intent, rg, s.sessionId, db());
 	return {};
 }
 
@@ -73,19 +90,22 @@ let compiled: { invoke: (x: S) => Promise<S> } | null = null;
 function compile(_database: AppDatabase) {
 	_db = _database;
 	const g: any = new StateGraph(State)
-		.addNode('intent' as any, nodeIntent)
+		.addNode('classify_intent' as any, nodeIntent)
 		.addNode('explore' as any, nodeExplore)
 		.addNode('draft' as any, nodeDraft)
 		.addNode('prd' as any, nodePrd)
 		.addNode('end' as any, nodeEnd);
-	g.addEdge(START, 'intent');
-	g.addConditionalEdges('intent' as any, (st: S) => routeAfterIntent(st), {
+	g.addEdge(START, 'classify_intent');
+	g.addConditionalEdges('classify_intent' as any, (st: S) => routeAfterIntent(st), {
 		noise: 'end' as any,
-		prd: 'prd' as any,
 		explore: 'explore' as any,
 		draft: 'draft' as any
 	});
-	g.addEdge('explore' as any, 'draft' as any);
+	g.addConditionalEdges(
+		'explore' as any,
+		(st: S) => (st.intent?.category === 'prd_update' ? 'prd' : 'draft'),
+		{ prd: 'prd' as any, draft: 'draft' as any }
+	);
 	g.addEdge('draft' as any, 'end' as any);
 	g.addEdge('prd' as any, 'end' as any);
 	g.addEdge('end' as any, END);

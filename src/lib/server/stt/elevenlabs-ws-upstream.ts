@@ -1,6 +1,6 @@
 import WebSocket from 'ws';
 import { getEnv } from '../config';
-import { buildScribeUrl } from './elevenlabs';
+import { buildScribeUrl, realtimeSttQuery } from './elevenlabs';
 
 export type SttEvent =
 	| { type: 'final'; text: string; speakerId: string | null; sessionId: string; raw: unknown }
@@ -8,62 +8,134 @@ export type SttEvent =
 	| { type: 'error'; message: string; sessionId: string };
 
 /**
- * Open upstream ElevenLabs WS. Accepts binary audio frames; emits JSON events (defensive parsing).
+ * Upstream to ElevenLabs `wss://.../v1/speech-to-text/realtime` (Scribe v2).
+ * - Auth: `xi-api-key` header (not `api_key` in query)
+ * - Client → EL: JSON `input_audio_chunk` with base64 PCM (forwarded as text)
+ * - EL → us: `session_started`, `partial_transcript`, `committed_transcript`, `error`, …
  */
 export function openUpstreamStt(options: {
 	onEvent: (e: SttEvent) => void;
-}): { send: (buf: Buffer) => void; close: () => void } {
+}): { sendClientJson: (line: string) => void; close: () => void } {
 	const key = getEnv().elevenlabsApiKey;
 	if (!key) {
 		throw new Error('ELEVENLABS_API_KEY is required for speech-to-text');
 	}
-	const url = new URL(buildScribeUrl());
-	url.searchParams.set('api_key', key);
-	if (getEnv().elevenlabsSttModel) {
-		url.searchParams.set('model', getEnv().elevenlabsSttModel);
+	const base = buildScribeUrl();
+	const u = new URL(base);
+	for (const [k, v] of realtimeSttQuery()) {
+		u.searchParams.set(k, v);
 	}
-	const ws = new WebSocket(url.toString());
-	const send = (buf: Buffer) => {
-		if (ws.readyState === WebSocket.OPEN) ws.send(buf);
-	};
-	const close = () => {
-		try {
-			ws.close();
-		} catch {
-			// ignore
+	const url = u.toString();
+
+	const pending: string[] = [];
+	const MAX_QUEUED = 400;
+	let sessionReady = false;
+
+	const tryFlush = () => {
+		if (!sessionReady || ws.readyState !== WebSocket.OPEN) return;
+		while (pending.length) {
+			const s = pending.shift();
+			if (s) ws.send(s);
 		}
 	};
+
+	const ws = new WebSocket(url, {
+		headers: { 'xi-api-key': key }
+	});
+
 	ws.on('message', (data) => {
 		try {
 			const s = data.toString();
 			const j = JSON.parse(s) as Record<string, unknown>;
-			const text = (j.text ?? j.transcript ?? j.message ?? (j as { data?: { text?: string } }).data
-				?.text) as string | undefined;
-			if (!text) return;
-			const isFinal = Boolean(
-				(j as { is_final?: boolean }).is_final === true || (j as { final?: boolean }).final === true
-			);
-			const isPartial = (j as { is_final?: boolean }).is_final === false;
-			if (!isFinal && isPartial) {
-				const sid = String((j as { session_id?: string }).session_id ?? 'default');
-				options.onEvent({ type: 'partial', text, sessionId: sid, raw: j });
+			const mtRaw = j.message_type;
+			const mt = typeof mtRaw === 'string' ? mtRaw.toLowerCase() : '';
+
+			function lineText(): string {
+				if (typeof j.text === 'string' && j.text) return j.text;
+				const tr = (j as { transcript?: unknown }).transcript;
+				return typeof tr === 'string' ? tr : '';
+			}
+
+			const sttErrTypes = new Set([
+				'error',
+				'auth_error',
+				'quota_exceeded',
+				'transcriber_error',
+				'input_error',
+				'commit_throttled',
+				'unaccepted_terms',
+				'unaccepted_terms_error',
+				'rate_limited',
+				'queue_overflow',
+				'resource_exhausted',
+				'session_time_limit_exceeded',
+				'chunk_size_exceeded',
+				'insufficient_audio_activity'
+			]);
+
+			if (mt === 'session_started') {
+				sessionReady = true;
+				tryFlush();
 				return;
 			}
-			// final if marked final or not explicitly partial
-			if (isFinal || !isPartial) {
-				const sid = String((j as { session_id?: string }).session_id ?? 'default');
+
+			if (mt === 'partial_transcript') {
+				const text = lineText();
+				if (text) {
+					options.onEvent({
+						type: 'partial',
+						text,
+						sessionId: 'default',
+						raw: j
+					});
+				}
+				return;
+			}
+
+			if (mt === 'committed_transcript' || mt === 'committed_transcript_with_timestamps') {
+				const text = lineText();
+				if (text) {
+					const sp = (j as { words?: { speaker_id?: string }[] }).words?.[0]?.speaker_id;
+					options.onEvent({
+						type: 'final',
+						text,
+						speakerId: typeof sp === 'string' ? sp : null,
+						sessionId: 'default',
+						raw: j
+					});
+				}
+				return;
+			}
+
+			if (mt && sttErrTypes.has(mt)) {
+				const errField = (j as { error?: unknown }).error;
+				const detail =
+					typeof errField === 'string'
+						? errField
+						: typeof (j as { message?: unknown }).message === 'string'
+							? (j as { message: string }).message
+							: JSON.stringify(j);
 				options.onEvent({
-					type: 'final',
-					text,
-					speakerId: (j as { speaker_id?: string }).speaker_id ?? null,
-					sessionId: sid,
-					raw: j
+					type: 'error',
+					message: `${mt}: ${detail}`,
+					sessionId: 'default'
+				});
+				return;
+			}
+
+			if (mt && mt.endsWith('error') && typeof (j as { error?: string }).error === 'string') {
+				const msg = (j as { error: string }).error;
+				options.onEvent({
+					type: 'error',
+					message: `${mt}: ${msg}`,
+					sessionId: 'default'
 				});
 			}
 		} catch {
-			// binary
+			// non-json
 		}
 	});
+
 	ws.on('error', (e) => {
 		options.onEvent({
 			type: 'error',
@@ -71,5 +143,27 @@ export function openUpstreamStt(options: {
 			sessionId: 'default'
 		});
 	});
-	return { send, close };
+
+	const sendClientJson = (line: string) => {
+		if (ws.readyState === WebSocket.OPEN && sessionReady) {
+			ws.send(line);
+		} else {
+			if (pending.length < MAX_QUEUED) pending.push(line);
+		}
+		if (ws.readyState === WebSocket.OPEN) tryFlush();
+	};
+
+	ws.on('open', () => {
+		tryFlush();
+	});
+
+	const close = () => {
+		try {
+			ws.close();
+		} catch {
+			// ignore
+		}
+	};
+
+	return { sendClientJson, close };
 }

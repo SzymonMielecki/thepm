@@ -22,6 +22,14 @@ export const IntentOutputSchema = z.object({
 
 export type IntentOutput = z.infer<typeof IntentOutputSchema>;
 
+/** Second-pass PRD patch after ripgrep / file context (section heading + new body). */
+export const PrdSectionPatchSchema = z.object({
+	section: z.string(),
+	newBody: z.string()
+});
+
+export type PrdSectionPatch = z.infer<typeof PrdSectionPatchSchema>;
+
 export const DraftTicketSchema = z.object({
 	title: z.string(),
 	description: z.string(),

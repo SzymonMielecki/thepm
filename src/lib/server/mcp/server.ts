@@ -1,18 +1,16 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
-import { getProjectPaths } from '../config';
-import { readScopedFile, listScopedDir } from '../fs-scoped';
-import { runRipgrep } from '../ripgrep';
-import { readPrd, applyPrdPatch } from '../prd/store';
+import { getCodeBackend } from '../code-bridge/code-backend';
+import { applyPrdPatch, readPrdForHub } from '../prd/store';
 import { getOrCreateDatabase } from '../db';
 import { z } from 'zod';
 import { getOrCreateSessionId } from '../session';
 
 /**
  * Fresh MCP server per HTTP request (stateless), same as SDK Hono example.
+ * Code tools use `CodeBackend` (local disk or thepm-bridge to the dev machine when CODE_BACKEND=bridge).
  */
 export function createMcpServer() {
-	const { projectRoot } = getProjectPaths();
 	const server = new McpServer({ name: 'always-on-pm', version: '0.1.0' });
 
 	server.registerTool(
@@ -22,7 +20,8 @@ export function createMcpServer() {
 			inputSchema: { path: z.string().describe('Relative path from project root') }
 		},
 		async ({ path: rel }) => {
-			const content = readScopedFile(projectRoot, rel);
+			const b = getCodeBackend();
+			const content = await b.readFile(rel);
 			return { content: [{ type: 'text' as const, text: content }] };
 		}
 	);
@@ -34,7 +33,8 @@ export function createMcpServer() {
 			inputSchema: { path: z.string().optional().describe('Relative path, default root') }
 		},
 		async ({ path: p }) => {
-			const list = listScopedDir(projectRoot, p ?? '');
+			const b = getCodeBackend();
+			const list = await b.listDir(p ?? '');
 			return { content: [{ type: 'text' as const, text: JSON.stringify(list, null, 2) }] };
 		}
 	);
@@ -49,7 +49,8 @@ export function createMcpServer() {
 			}
 		},
 		async ({ pattern, subpath }) => {
-			const hits = await runRipgrep(pattern, { path: subpath, max: 30 });
+			const b = getCodeBackend();
+			const hits = await b.ripgrep(pattern, { subpath, max: 30 });
 			return { content: [{ type: 'text' as const, text: JSON.stringify(hits, null, 2) }] };
 		}
 	);
@@ -61,7 +62,7 @@ export function createMcpServer() {
 			inputSchema: z.object({})
 		},
 		async () => {
-			const t = readPrd();
+			const t = await readPrdForHub();
 			return { content: [{ type: 'text' as const, text: t }] };
 		}
 	);
@@ -79,13 +80,16 @@ export function createMcpServer() {
 		async ({ section, newBody, session }) => {
 			const db = getOrCreateDatabase();
 			const sid = getOrCreateSessionId(db, session);
-			const r = applyPrdPatch(db, sid, section, newBody);
+			const r = await applyPrdPatch(db, sid, section, newBody);
 			if (r && 'ok' in r && r.ok) {
 				return { content: [{ type: 'text' as const, text: r.content }] };
 			}
 			return {
 				content: [
-					{ type: 'text' as const, text: (r as { error?: string })?.error ?? 'PRD patch failed' }
+					{
+						type: 'text' as const,
+						text: (r as { error?: string })?.error ?? 'PRD patch failed'
+					}
 				]
 			};
 		}

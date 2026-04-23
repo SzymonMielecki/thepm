@@ -1,3 +1,4 @@
+import '$lib/server/load-dotenv';
 import { getOrCreateDatabase } from '$lib/server/db';
 import { initPrdStore } from '$lib/server/prd/store';
 import { getProjectPaths } from '$lib/server/config';
@@ -14,6 +15,10 @@ function boot() {
 }
 
 export const handle = async ({ event, resolve }) => {
+	// Browsers request /favicon.ico by default; do not require SQLite for that.
+	if (event.url.pathname === '/favicon.ico') {
+		return resolve(event);
+	}
 	boot();
 	event.locals.db = getOrCreateDatabase();
 	return resolve(event);
