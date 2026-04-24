@@ -11,14 +11,14 @@ import {
 import { publish } from '../bus';
 import { randomUUID } from 'node:crypto';
 import type { AppDatabase } from '../db';
-import { applyPrdPatch, readPrdForHub } from '../prd/store';
+import { readPrdForHub } from '../prd/store';
 
 const intentPrompt = `You are a product manager assistant. Classify the latest team utterance.
 The message may include the current root PRD (PRD.md) for context so you can align prd_update sections with existing headings.
 Return JSON only matching the schema. Use category "noise" for small talk.
 Use "ticket" when the primary ask is actionable engineering work, bugs, or implementation tasks (even if the PRD should stay in sync — the ticket path captures the work).
 Use "prd_update" when the primary ask is to change product scope, requirements, or documentation wording only.
-If the utterance is mainly a PRD/doc update but it clearly implies engineering work to execute (e.g. "add feature X to the app", "we need to support Y"), set category "prd_update", fill prd hints as usual, and set alsoCreateTicket to true so a draft ticket is created after the doc update.
+For prd_update, include prd hints as usual; PRD edits are applied only after explicit draft approval.
 Extract file or component name hints: for prd_update, add fileHints whenever the request touches specific code, features, or paths so the doc can be grounded in repo search.`;
 
 const draftPrompt = `You are a product manager. Given intent, the root PRD (if any), and any code context snippets, output JSON with title, description (markdown, include file refs as path:line), fileRefs, acceptance (strings), assigneeHint (optional, name only). Return JSON only.`;
@@ -103,7 +103,7 @@ export async function runDraft(
 	const allowDraft =
 		intent.category === 'ticket' ||
 		intent.category === 'unclear' ||
-		(intent.category === 'prd_update' && intent.alsoCreateTicket);
+		intent.category === 'prd_update';
 	if (!allowDraft) return null;
 	publish({ type: 'agent_trace', phase: 'draft', detail: 'Composing ticket', sessionId });
 	const model = getChatModel();
@@ -137,11 +137,26 @@ export async function runDraft(
 	]);
 }
 
-export function persistDraft(db: AppDatabase, sessionId: string, d: DraftTicket) {
+type PendingPrdPatch = { section: string; newBody: string };
+
+export function persistDraft(
+	db: AppDatabase,
+	sessionId: string,
+	d: DraftTicket,
+	opts?: { pendingPrdPatch?: PendingPrdPatch | null }
+) {
 	const id = randomUUID();
 	db.prepare(
-		"INSERT INTO ticket_drafts (id, session_id, title, description, assignee_hint, state) VALUES (?,?,?,?,?,'pending')"
-	).run(id, sessionId, d.title, d.description, d.assigneeHint ?? null);
+		"INSERT INTO ticket_drafts (id, session_id, title, description, assignee_hint, state, prd_section, prd_body) VALUES (?,?,?,?,?,'pending',?,?)"
+	).run(
+		id,
+		sessionId,
+		d.title,
+		d.description,
+		d.assigneeHint ?? null,
+		opts?.pendingPrdPatch?.section ?? null,
+		opts?.pendingPrdPatch?.newBody ?? null
+	);
 	publish({ type: 'draft', id, title: d.title, state: 'pending' });
 	return id;
 }
@@ -155,7 +170,7 @@ export async function runPrdPatchFromContext(
 	intent: IntentOutput,
 	rg: { path: string; line: number; text: string; excerpt?: string }[],
 	sessionId: string,
-	db: AppDatabase
+	_db: AppDatabase
 ) {
 	if (intent.category !== 'prd_update') return null;
 	publish({ type: 'agent_trace', phase: 'prd_refine', detail: 'Composing PRD patch from repo context', sessionId });
@@ -198,6 +213,7 @@ export async function runPrdPatchFromContext(
 		new SystemMessage(prdRefinePrompt),
 		new HumanMessage(blocks.join('\n\n'))
 	]);
-	return await applyPrdPatch(db, sessionId, out.section, out.newBody);
+	publish({ type: 'prd_proposed', section: out.section, body: out.newBody });
+	return out;
 }
 

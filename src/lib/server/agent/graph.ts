@@ -13,6 +13,10 @@ const State = Annotation.Root({
 	rg: Annotation<
 		{ path: string; line: number; text: string; excerpt?: string }[] | null
 	>({ reducer: (_x, y) => y, default: () => null }),
+	pendingPrdPatch: Annotation<{ section: string; newBody: string } | null>({
+		reducer: (_x, y) => y,
+		default: () => null
+	}),
 	draftId: Annotation<string | null>({ reducer: (_x, y) => y, default: () => null })
 });
 
@@ -70,15 +74,15 @@ async function nodeDraft(s: S): Promise<Partial<S>> {
 	const rg = s.rg ?? [];
 	const d = await runDraft(s.utterance, s.intent, rg, s.sessionId);
 	if (!d) return {};
-	const id = persistDraft(db(), s.sessionId, d);
+	const id = persistDraft(db(), s.sessionId, d, { pendingPrdPatch: s.pendingPrdPatch });
 	return { draftId: id };
 }
 
 async function nodePrd(s: S): Promise<Partial<S>> {
 	if (!s.intent) return {};
 	const rg = s.rg ?? [];
-	await runPrdPatchFromContext(s.utterance, s.intent, rg, s.sessionId, db());
-	return {};
+	const pendingPrdPatch = await runPrdPatchFromContext(s.utterance, s.intent, rg, s.sessionId, db());
+	return { pendingPrdPatch };
 }
 
 async function nodeEnd(_s: S): Promise<Partial<S>> {
@@ -109,9 +113,8 @@ function compile(_database: AppDatabase) {
 	g.addEdge('draft' as any, 'end' as any);
 	g.addConditionalEdges(
 		'prd' as any,
-		(st: S) =>
-			st.intent?.category === 'prd_update' && st.intent.alsoCreateTicket ? 'draft' : 'end',
-		{ draft: 'draft' as any, end: 'end' as any }
+		(_st: S) => 'draft',
+		{ draft: 'draft' as any }
 	);
 	g.addEdge('end' as any, END);
 	compiled = g.compile() as { invoke: (x: S) => Promise<S> };
@@ -131,6 +134,7 @@ export async function runPmGraph(input: { db: AppDatabase; sessionId: string; ut
 		sessionId,
 		intent: null,
 		rg: null,
+		pendingPrdPatch: null,
 		draftId: null
 	} as S);
 	return out;

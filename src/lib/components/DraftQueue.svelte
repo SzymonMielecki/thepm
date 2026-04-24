@@ -18,8 +18,18 @@
 			headers: { Authorization: token ? `Bearer ${token}` : '' }
 		});
 		if (r.ok) {
+			const payload = (await r.json()) as { prdApplied?: boolean; prdError?: string | null };
 			await onupdate();
-			ontoast('success', 'Draft approved and sent to Linear.');
+			if (payload.prdError) {
+				ontoast('error', `Draft approved, but PRD update failed: ${payload.prdError}`);
+				return;
+			}
+			ontoast(
+				'success',
+				payload.prdApplied
+					? 'Draft approved, sent to Linear, and PRD updated.'
+					: 'Draft approved and sent to Linear.'
+			);
 			return;
 		}
 		ontoast('error', `Approve failed (${r.status}).`);

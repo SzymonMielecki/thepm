@@ -30,6 +30,8 @@ CREATE TABLE IF NOT EXISTS ticket_drafts (
 	title TEXT NOT NULL,
 	description TEXT NOT NULL,
 	assignee_hint TEXT,
+	prd_section TEXT,
+	prd_body TEXT,
 	state TEXT NOT NULL DEFAULT 'pending',
 	created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );

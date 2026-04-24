@@ -5,6 +5,7 @@ import { error } from '@sveltejs/kit';
 import { findUserIdByNameHint, createIssueFromDraft } from '$lib/server/linear';
 import { getEnv } from '$lib/server/config';
 import { publish } from '$lib/server/bus';
+import { applyPrdPatch } from '$lib/server/prd/store';
 export const POST = async (event: RequestEvent) => {
 	try {
 		assertHubToken(event);
@@ -22,9 +23,12 @@ export const POST = async (event: RequestEvent) => {
 		.get(id) as
 		| {
 				id: string;
+				session_id: string;
 				title: string;
 				description: string;
 				assignee_hint: string | null;
+				prd_section: string | null;
+				prd_body: string | null;
 				state: string;
 		  }
 		| undefined;
@@ -43,5 +47,21 @@ export const POST = async (event: RequestEvent) => {
 		.prepare('INSERT OR REPLACE INTO linear_tickets (id, draft_id, linear_identifier, url) VALUES (?,?,?,?)')
 		.run(created.id, id, created.identifier ?? '', created.url ?? '');
 	publish({ type: 'draft', id, title: row.title, state: 'approved' });
-	return json({ ok: true, linear: created });
+	let prdApplied = false;
+	let prdError: string | null = null;
+	if (row.prd_section && row.prd_body != null) {
+		const prd = await applyPrdPatch(db, row.session_id ?? null, row.prd_section, row.prd_body);
+		if (prd.ok) {
+			prdApplied = true;
+		} else {
+			prdError = prd.error;
+			publish({
+				type: 'agent_trace',
+				phase: 'prd_apply',
+				detail: `Approved draft PRD patch failed: ${prd.error}`,
+				sessionId: row.session_id
+			});
+		}
+	}
+	return json({ ok: true, linear: created, prdApplied, prdError });
 };

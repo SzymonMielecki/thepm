@@ -287,9 +287,22 @@
       void fetch(`/api/tickets/${drafts[0]!.id}/approve`, {
         method: "POST",
         headers: authHeader(),
-      }).then((r) => {
+      }).then(async (r) => {
         if (r.ok) {
-          pushToast("success", "Draft approved and sent to Linear.");
+          const payload = (await r.json()) as {
+            prdApplied?: boolean;
+            prdError?: string | null;
+          };
+          if (payload.prdError) {
+            pushToast(
+              "error",
+              `Draft approved, but PRD update failed: ${payload.prdError}`,
+            );
+          } else if (payload.prdApplied) {
+            pushToast("success", "Draft approved, sent to Linear, and PRD updated.");
+          } else {
+            pushToast("success", "Draft approved and sent to Linear.");
+          }
           return loadDrafts();
         }
         pushToast("error", `Approve failed (${r.status}).`);

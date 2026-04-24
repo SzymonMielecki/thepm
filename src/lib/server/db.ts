@@ -25,6 +25,17 @@ function runMigrations(db: AppDatabase) {
 	}
 }
 
+function ensureTicketDraftColumns(db: AppDatabase) {
+	const cols = db.prepare("PRAGMA table_info('ticket_drafts')").all() as { name: string }[];
+	const names = new Set(cols.map((c) => c.name));
+	if (!names.has('prd_section')) {
+		db.exec('ALTER TABLE ticket_drafts ADD COLUMN prd_section TEXT');
+	}
+	if (!names.has('prd_body')) {
+		db.exec('ALTER TABLE ticket_drafts ADD COLUMN prd_body TEXT');
+	}
+}
+
 export function getOrCreateDatabase(): AppDatabase {
 	if (dbInstance) return dbInstance;
 	const { databasePath } = getEnv();
@@ -39,6 +50,7 @@ export function getOrCreateDatabase(): AppDatabase {
 	if (!row) {
 		runMigrations(db);
 	}
+	ensureTicketDraftColumns(db);
 	dbInstance = db;
 	return db;
 }
