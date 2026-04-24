@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Single entry for the product: the hub "runner" serves the web app, mobile PWA (`/mobile`),
+ * Single entry for the product: the hub "runner" serves the web app, recorder PWA (`/recorder`),
  * WebSockets, and API from one process. Use `thepm bridge` when you need a separate repo
  * machine connected to this hub.
  */
@@ -21,7 +21,7 @@ const args = process.argv.slice(2);
 
 function printHelp() {
 	console.log(`Usage:
-  thepm, thepm start   Run the hub (HTTP + /mobile PWA, WebSockets) — default http://0.0.0.0:5173 (override PORT)
+  thepm, thepm start   Run the hub (HTTP + /recorder PWA, WebSockets) — default http://0.0.0.0:5173 (override PORT)
   thepm bridge --…     Outbound code bridge to a remote hub (same flags as thepm-bridge)
 
 Linear (optional; overrides LINEAR_* from .env):

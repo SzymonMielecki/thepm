@@ -33,23 +33,24 @@ function parseBridgePrdBootstrap(raw: string | undefined): BridgePrdBootstrapMod
 	return 'if_empty';
 }
 
-export type HubTokenMode = 'explicit' | 'derived' | 'open';
+/** True when the hub token is derived from the project path (for logs / copy hints). */
+export function isHubTokenDerivedFromPath(): boolean {
+	if ((process.env.HUB_TOKEN ?? '').trim()) return false;
+	if (hubTokenAutoDisabled()) return false;
+	return true;
+}
 
 export function getEnv() {
 	const ollamaBase = (process.env.OLLAMA_BASE_URL || 'http://127.0.0.1:11434').trim().replace(/\/$/, '');
 	const base = projectBaseDir();
 	const explicit = (process.env.HUB_TOKEN ?? '').trim();
 	let hubToken: string;
-	let hubTokenMode: HubTokenMode;
 	if (explicit) {
 		hubToken = explicit;
-		hubTokenMode = 'explicit';
 	} else if (hubTokenAutoDisabled()) {
 		hubToken = '';
-		hubTokenMode = 'open';
 	} else {
 		hubToken = deriveHubTokenForProjectRoot(base);
-		hubTokenMode = 'derived';
 	}
 	return {
 		nodeEnv: process.env.NODE_ENV ?? 'development',
@@ -65,7 +66,6 @@ export function getEnv() {
 		bridgePrdBootstrap: parseBridgePrdBootstrap(process.env.PRD_BOOTSTRAP || process.env.BRIDGE_PRD_BOOTSTRAP),
 		/** Shared token for WS + SSE; or derived from project path when unset (see HUB_TOKEN_AUTO). */
 		hubToken,
-		hubTokenMode,
 		llmProvider: (process.env.LLM_PROVIDER as LlmProvider) || 'anthropic',
 		anthropicApiKey: process.env.ANTHROPIC_API_KEY?.trim(),
 		openaiApiKey: process.env.OPENAI_API_KEY?.trim(),

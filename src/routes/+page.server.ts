@@ -1,11 +1,9 @@
-import { getEnv, type HubTokenMode } from '$lib/server/config';
+import { getEnv } from '$lib/server/config';
 import { isBridgeReady } from '$lib/server/code-bridge/code-backend';
 import { isLinearApiConfigured } from '$lib/server/linear';
 import type { PageServerLoad } from './$types';
 
 type IndexPageData = {
-	hubToken: string;
-	hubTokenMode: HubTokenMode;
 	bridgeReady: boolean;
 	bridgeSessionActive: boolean;
 	flags: { eleven: boolean; linear: boolean; llm: boolean; ripgrep: boolean };
@@ -21,8 +19,6 @@ export const load: PageServerLoad = async ({ locals }): Promise<IndexPageData> =
 				? !!e.openaiApiKey
 				: !!e.anthropicApiKey;
 	return {
-		hubToken: '',
-		hubTokenMode: 'open',
 		bridgeReady: ripgrepOk,
 		bridgeSessionActive: !!locals.bridgeSessionActive,
 		flags: {
