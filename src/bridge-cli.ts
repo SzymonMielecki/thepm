@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
- * Local code bridge: connects to the hub over WebSocket. All per-repo / per-run
- * settings are required on the command line (no ~/.config, no env for hub/repo).
+ * Local code bridge: connects to the hub over WebSocket. Hub URL, project root,
+ * and PRD path default for local dev; override with flags (no ~/.config, no env for hub/repo).
  */
 import { parseArgs } from 'node:util';
 import { resolve } from 'node:path';
@@ -11,16 +11,23 @@ import { z } from 'zod';
 import { executeCodeOp, type CodeBridgeContext } from './lib/server/code-bridge/execute-op';
 import type { CodeReqMessage } from './lib/server/code-bridge/protocol';
 
+const DEFAULT_HUB_URL = 'http://127.0.0.1:5173';
+const DEFAULT_PROJECT_ROOT = '.';
+const DEFAULT_PRD = 'PRD.md';
+
 const USAGE = `Usage: thepm bridge \\
-  --hub-url <https://your-hub.example.com> \\
-  --project-root <path> \\
-  --prd <path-to-PRD.md> \\
+  [--hub-url <url>]      (default: ${DEFAULT_HUB_URL}) \\
+  [--project-root <path>]  (default: ${DEFAULT_PROJECT_ROOT}) \\
+  [--prd <path-to-PRD.md>] (default: ${DEFAULT_PRD}) \\
   [--token <BRIDGE_TOKEN>] \\
   [--workspace <id>]     (default: default; must match hub CODE_BRIDGE_WORKSPACE_ID) \\
   [--linear-api-key <key>] [--linear-team-id <uuid>]  (override hub LINEAR_* for this connection; \\
                           alias: --lin-team-id)
 
-Example (run from the repo you are exposing):
+Example (local hub on Vite’s default port — flags optional):
+  thepm bridge
+
+Example (remote or non-default paths):
   thepm bridge \\
   --hub-url https://pm.example.com \\
   --project-root . \\
@@ -75,23 +82,13 @@ function parseBridgeCli() {
 		printUsage();
 		process.exit(0);
 	}
-	const errors: string[] = [];
-	if (!values['hub-url']) errors.push('--hub-url is required');
-	if (!values['project-root']) errors.push('--project-root is required');
-	if (!values.prd) errors.push('--prd is required');
-	if (errors.length) {
-		// eslint-disable-next-line no-console
-		console.error(errors.join('\n') + '\n');
-		printUsage();
-		process.exit(1);
-	}
 	const teamFromBridge =
 		values['linear-team-id']?.trim() || values['lin-team-id']?.trim();
 	const raw = {
-		'hub-url': values['hub-url']!.trim(),
+		'hub-url': values['hub-url']?.trim() || DEFAULT_HUB_URL,
 		token: values.token?.trim(),
-		'project-root': values['project-root']!.trim(),
-		prd: values.prd!.trim(),
+		'project-root': values['project-root']?.trim() || DEFAULT_PROJECT_ROOT,
+		prd: values.prd?.trim() || DEFAULT_PRD,
 		workspace: (values.workspace ?? 'default').trim() || 'default',
 		'linear-api-key': values['linear-api-key']?.trim(),
 		'linear-team-id': teamFromBridge

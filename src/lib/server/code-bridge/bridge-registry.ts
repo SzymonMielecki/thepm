@@ -24,11 +24,30 @@ type BridgeEntry = {
 	linearTeamId?: string;
 };
 
-const bridges = new Map<string, BridgeEntry>();
-const pending = new Map<string, Pending>();
 type BridgeUiSession = { workspaceId: string; token: string; expiresAt: number };
-const bridgeUiSessionsByWorkspace = new Map<string, BridgeUiSession>();
-const bridgeUiSessionsByToken = new Map<string, BridgeUiSession>();
+
+/** `server.ts` (tsx) and the bundled SvelteKit server are separate module instances — share in-memory state on globalThis. */
+type BridgeGlobalMaps = {
+	bridges: Map<string, BridgeEntry>;
+	pending: Map<string, Pending>;
+	bridgeUiSessionsByWorkspace: Map<string, BridgeUiSession>;
+	bridgeUiSessionsByToken: Map<string, BridgeUiSession>;
+};
+
+function getBridgeMaps(): BridgeGlobalMaps {
+	const g = globalThis as typeof globalThis & { __thepmBridgeRegistryMaps?: BridgeGlobalMaps };
+	if (!g.__thepmBridgeRegistryMaps) {
+		g.__thepmBridgeRegistryMaps = {
+			bridges: new Map(),
+			pending: new Map(),
+			bridgeUiSessionsByWorkspace: new Map(),
+			bridgeUiSessionsByToken: new Map()
+		};
+	}
+	return g.__thepmBridgeRegistryMaps;
+}
+
+const { bridges, pending, bridgeUiSessionsByWorkspace, bridgeUiSessionsByToken } = getBridgeMaps();
 
 function safeSend(ws: WsType, obj: object) {
 	if (ws.readyState !== WebSocket.OPEN) {

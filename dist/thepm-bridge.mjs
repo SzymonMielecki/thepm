@@ -256,16 +256,22 @@ async function executeCodeOp(ctx, op, args) {
 }
 
 // src/bridge-cli.ts
+var DEFAULT_HUB_URL = "http://127.0.0.1:5173";
+var DEFAULT_PROJECT_ROOT = ".";
+var DEFAULT_PRD = "PRD.md";
 var USAGE = `Usage: thepm bridge \\
-  --hub-url <https://your-hub.example.com> \\
-  --project-root <path> \\
-  --prd <path-to-PRD.md> \\
+  [--hub-url <url>]      (default: ${DEFAULT_HUB_URL}) \\
+  [--project-root <path>]  (default: ${DEFAULT_PROJECT_ROOT}) \\
+  [--prd <path-to-PRD.md>] (default: ${DEFAULT_PRD}) \\
   [--token <BRIDGE_TOKEN>] \\
   [--workspace <id>]     (default: default; must match hub CODE_BRIDGE_WORKSPACE_ID) \\
   [--linear-api-key <key>] [--linear-team-id <uuid>]  (override hub LINEAR_* for this connection; \\
                           alias: --lin-team-id)
 
-Example (run from the repo you are exposing):
+Example (local hub on Vite\u2019s default port \u2014 flags optional):
+  thepm bridge
+
+Example (remote or non-default paths):
   thepm bridge \\
   --hub-url https://pm.example.com \\
   --project-root . \\
@@ -316,21 +322,12 @@ function parseBridgeCli() {
     printUsage();
     process.exit(0);
   }
-  const errors = [];
-  if (!values["hub-url"]) errors.push("--hub-url is required");
-  if (!values["project-root"]) errors.push("--project-root is required");
-  if (!values.prd) errors.push("--prd is required");
-  if (errors.length) {
-    console.error(errors.join("\n") + "\n");
-    printUsage();
-    process.exit(1);
-  }
   const teamFromBridge = values["linear-team-id"]?.trim() || values["lin-team-id"]?.trim();
   const raw = {
-    "hub-url": values["hub-url"].trim(),
+    "hub-url": values["hub-url"]?.trim() || DEFAULT_HUB_URL,
     token: values.token?.trim(),
-    "project-root": values["project-root"].trim(),
-    prd: values.prd.trim(),
+    "project-root": values["project-root"]?.trim() || DEFAULT_PROJECT_ROOT,
+    prd: values.prd?.trim() || DEFAULT_PRD,
     workspace: (values.workspace ?? "default").trim() || "default",
     "linear-api-key": values["linear-api-key"]?.trim(),
     "linear-team-id": teamFromBridge
@@ -393,6 +390,18 @@ async function main() {
   }
   let reportedConnRefused = false;
   const ws = new WebSocket(url);
+  ws.on("unexpected-response", (_req, res) => {
+    const c = res.statusCode ?? 0;
+    if (c === 404) {
+      console.error(
+        "[thepm-bridge] The hub at this URL has no /api/bridge WebSocket (HTTP 404 on upgrade). Vercel and similar serverless deploys do not run the Node hub that attaches the bridge. Build and start the hub from this same repo: `pnpm build && thepm` (or `pnpm dev`); use the printed origin in `--hub-url`, or use a long-lived host that runs `server.ts`.\n  (If you are sure the hub is the Node process, the site may be the wrong app or a stale deployment.)"
+      );
+    } else {
+      console.error(
+        `[thepm-bridge] WebSocket upgrade failed: HTTP ${c} ${res.statusMessage || ""}`.trim()
+      );
+    }
+  });
   const send = (o) => {
     if (ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify(o));
