@@ -95,11 +95,23 @@ export function openUpstreamStt(options: {
 			if (mt === 'committed_transcript' || mt === 'committed_transcript_with_timestamps') {
 				const text = lineText();
 				if (text) {
-					const sp = (j as { words?: { speaker_id?: string }[] }).words?.[0]?.speaker_id;
+					let sp: string | null = null;
+					const words = (j as { words?: unknown }).words;
+					if (Array.isArray(words)) {
+						for (const w of words) {
+							if (!w || typeof w !== 'object') continue;
+							const o = w as Record<string, unknown>;
+							const sid = o.speaker_id ?? o.speakerId;
+							if (typeof sid === 'string' && sid.trim()) {
+								sp = sid;
+								break;
+							}
+						}
+					}
 					options.onEvent({
 						type: 'final',
 						text,
-						speakerId: typeof sp === 'string' ? sp : null,
+						speakerId: sp,
 						sessionId: 'default',
 						raw: j
 					});

@@ -4,12 +4,17 @@
 		title: string;
 		description: string;
 		state: string;
+		assigneeHint?: string | null;
+		assigneeUserId?: string | null;
+		linearIdentifier?: string | null;
+		linearUrl?: string | null;
 	};
 	let {
 		drafts = [] as Draft[],
 		token = '',
 		onupdate = () => {},
-		ontoast = (_kind: 'success' | 'error', _message: string) => {}
+		ontoast = (_kind: 'success' | 'error', _message: string) => {},
+		frameless = false
 	} = $props();
 
 	async function approve(id: string) {
@@ -49,12 +54,22 @@
 	}
 </script>
 
-<div class="flex min-h-0 h-full max-h-full flex-col gap-2 overflow-y-auto rounded-lg border border-zinc-800 bg-zinc-900/50 p-3">
-	<h2 class="text-xs font-semibold uppercase tracking-wider text-zinc-500">Ticket drafts</h2>
+<div
+	class="flex min-h-0 min-w-0 flex-1 flex-col gap-2 overflow-y-auto overscroll-contain rounded-lg bg-zinc-900/50 p-3 {frameless
+		? ''
+		: 'border border-zinc-800'}"
+>
 	{#each drafts as d}
+		{@const approvedLabel =
+			d.state === 'approved' && d.linearIdentifier?.trim()
+				? d.linearIdentifier.trim()
+				: d.state}
 		<article class="space-y-2 rounded border border-zinc-800 bg-zinc-950 p-3">
 			<header class="font-medium text-zinc-100">{d.title}</header>
 			<pre class="max-h-40 overflow-auto text-xs text-zinc-400 whitespace-pre-wrap font-sans">{d.description}</pre>
+			{#if d.assigneeHint}
+				<p class="text-xs text-zinc-500">Assignee: {d.assigneeHint}</p>
+			{/if}
 			<div class="flex flex-wrap items-center gap-2">
 				<span
 					class="rounded px-1.5 py-0.5 text-xs {d.state === 'pending'
@@ -62,7 +77,17 @@
 						: d.state === 'approved'
 							? 'bg-emerald-500/20 text-emerald-300'
 							: 'bg-zinc-700 text-zinc-400'}"
-					>{d.state}</span
+					>{#if d.state === 'approved' && d.linearUrl?.trim()}
+						<a
+							href={d.linearUrl.trim()}
+							target="_blank"
+							rel="noopener noreferrer"
+							class="font-medium underline decoration-emerald-500/50 hover:decoration-emerald-300"
+							>{approvedLabel}</a
+						>
+					{:else}
+						{approvedLabel}
+					{/if}</span
 				>
 				{#if d.state === 'pending'}
 					<button

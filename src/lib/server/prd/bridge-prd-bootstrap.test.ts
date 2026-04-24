@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { isStubOrEmptyPrd } from './bridge-prd-bootstrap';
+import { isStubOrEmptyPrd } from '$lib/prd/is-stub-or-empty';
 
 describe('isStubOrEmptyPrd', () => {
 	it('detects default stub', () => {

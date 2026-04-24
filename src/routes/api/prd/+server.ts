@@ -18,7 +18,12 @@ export const GET = async (event: RequestEvent) => {
 		const env = getEnv();
 		const bridge = getBridgeClientPaths(env.codeBridgeWorkspaceId);
 		const prdFilePath = bridge ? bridge.prdPath : getProjectPaths().prdPath;
-		return json({ content, source: 'bridge', prdFilePath });
+		return json({
+			content,
+			source: 'bridge',
+			prdFilePath,
+			prdBootstrap: env.bridgePrdBootstrap
+		});
 	} catch (e) {
 		const msg = (e as Error).message;
 		return new Response(

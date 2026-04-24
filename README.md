@@ -40,7 +40,7 @@ npm start
 # or: pnpm thepm
 ```
 
-Default URL: `http://0.0.0.0:3000`. The [`bin/thepm.mjs`](./bin/thepm.mjs) entry is the same runner (`pnpm thepm` = `node --import tsx server.ts`). Run `pnpm thepm bridge` from the target repository so the hub can access files and `PRD.md` (see [`packages/bridge/README.md`](./packages/bridge/README.md)).
+Default URL: `http://0.0.0.0:5173` (same default port as `npm run dev`; set `PORT` to change it). The [`bin/thepm.mjs`](./bin/thepm.mjs) entry is the same runner (`pnpm thepm` = `node --import tsx server.ts`). Run `pnpm thepm bridge` from the target repository so the hub can access files and `PRD.md` (see [`packages/bridge/README.md`](./packages/bridge/README.md)).
 
 ### Run it outside this repo (or from any working directory)
 
@@ -62,13 +62,15 @@ thepm bridge \
   --workspace default
 ```
 
+Optional: pass Linear credentials from the bridge (overrides hub `LINEAR_*` for that connection): `--linear-api-key …` and `--linear-team-id …` (alias `--lin-team-id`).
+
 The hub and bridge are scoped as:
 - **One hub instance = one project/repository context**
 - **Many `/mobile` clients** can connect to that same hub/project
 
 | Approach | You need on disk at runtime |
 |----------|-----------------------------|
-| **Docker** | No git checkout: build the image (or use a prebuilt one), `docker run -p 3000:3000 -v …` with env. See the [`Dockerfile`](./Dockerfile) header comment. |
+| **Docker** | No git checkout: build the image (or use a prebuilt one), `docker run -p 5173:5173 -e PORT=5173 -v …` with env. See the [`Dockerfile`](./Dockerfile) header comment. |
 | **Install in a fixed path** | Clone the hub once to e.g. `/opt/thepm`, then `pnpm install && pnpm build`, copy `.env`, `cd` to your app repo and run `thepm` (or set `PROJECT_ROOT` in `.env`). |
 | **Global CLI** | From a clone: `pnpm link -g` (or `npm link`) so `thepm` is on your `PATH`. Run it from the **application** directory you want to manage; `thepm` still resolves runtime files from the linked install. |
 | **Loose `bin/thepm.mjs` only** | Set **`THEPM_ROOT`** to the **absolute** path of a full install (same as above). The wrapper in [`bin/thepm.mjs`](./bin/thepm.mjs) uses it when the script is not next to the rest of the package. |
@@ -101,7 +103,7 @@ Important:
 Browsers only grant **getUserMedia** in **secure contexts** (HTTPS, or `http://localhost`). So:
 
 - **On the same machine:** open `http://127.0.0.1:<PORT>/mobile` (see `[hub] Mobile PWA` in the server log after `thepm` / `npm start`).
-- **On another device (LAN):** use the **On LAN (device)** lines printed at startup, or use **Tailscale Funnel** / another HTTPS edge so the phone loads **HTTPS** (plain `http://<lan-ip>:3000` may block the mic). The WebSocket for streaming audio upgrades on the same origin: `ws://…/api/audio/stream` (or `wss://` with HTTPS). Use the same active bridge token (or the same `bridge_session` URL flow) on phone and desktop.
+- **On another device (LAN):** use the **On LAN (device)** lines printed at startup, or use **Tailscale Funnel** / another HTTPS edge so the phone loads **HTTPS** (plain `http://<lan-ip>:5173` may block the mic). The WebSocket for streaming audio upgrades on the same origin: `ws://…/api/audio/stream` (or `wss://` with HTTPS). Use the same active bridge token (or the same `bridge_session` URL flow) on phone and desktop.
 
 ## Tailscale Funnel (HTTPS for the PWA mic)
 
@@ -110,12 +112,12 @@ Funnel only **proxies** to your machine. You must (1) run the app in one termina
 | How you run the app | Funnel command |
 |---------------------|----------------|
 | `npm run dev` (Vite, default **5173**) | `tailscale funnel 5173` |
-| `npm run build && npm start` (Node, default **3000**) | `tailscale funnel 3000` |
+| `npm run build && npm start` (Node, default **5173**) | `tailscale funnel 5173` |
 
 ```bash
 # Terminal A — the hub
 npm run dev
-# or: PORT=3000 npm start   # after build
+# or: PORT=8080 npm start   # after build, if you need a different port
 
 # Terminal B — expose HTTPS (Funnel must stay running)
 tailscale funnel 5173

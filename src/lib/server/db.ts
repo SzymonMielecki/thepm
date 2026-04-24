@@ -34,6 +34,26 @@ function ensureTicketDraftColumns(db: AppDatabase) {
 	if (!names.has('prd_body')) {
 		db.exec('ALTER TABLE ticket_drafts ADD COLUMN prd_body TEXT');
 	}
+	if (!names.has('assignee_user_id')) {
+		db.exec('ALTER TABLE ticket_drafts ADD COLUMN assignee_user_id TEXT');
+	}
+}
+
+function ensureSessionSpeakerTable(db: AppDatabase) {
+	db.exec(`
+		CREATE TABLE IF NOT EXISTS session_speakers (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			session_id TEXT NOT NULL REFERENCES sessions (id) ON DELETE CASCADE,
+			speaker_id TEXT NOT NULL,
+			display_name TEXT,
+			linear_user_id TEXT,
+			linear_name TEXT,
+			created_at TEXT NOT NULL DEFAULT (datetime('now')),
+			updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+			UNIQUE (session_id, speaker_id)
+		);
+		CREATE INDEX IF NOT EXISTS idx_session_speakers_session ON session_speakers (session_id);
+	`);
 }
 
 export function getOrCreateDatabase(): AppDatabase {
@@ -51,6 +71,7 @@ export function getOrCreateDatabase(): AppDatabase {
 		runMigrations(db);
 	}
 	ensureTicketDraftColumns(db);
+	ensureSessionSpeakerTable(db);
 	dbInstance = db;
 	return db;
 }

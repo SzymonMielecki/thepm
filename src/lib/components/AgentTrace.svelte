@@ -1,6 +1,6 @@
 <script lang="ts">
 	type Trace = { phase: string; detail: string; t: number };
-	let { traces = [] as Trace[] } = $props();
+	let { traces = [] as Trace[], frameless = false } = $props();
 
 	function formatTraceTime(t: number) {
 		const d = new Date(t);
@@ -15,7 +15,9 @@
 </script>
 
 <div
-	class="h-full min-h-0 w-full overflow-y-auto rounded border border-zinc-800 bg-zinc-900/30 p-2 font-mono text-xs text-zinc-500"
+	class="h-full min-h-0 w-full overflow-y-auto rounded bg-zinc-900/30 p-2 font-mono text-xs text-zinc-500 {frameless
+		? ''
+		: 'border border-zinc-800'}"
 >
 	{#each traces as t}
 		<div class="flex items-start gap-2">

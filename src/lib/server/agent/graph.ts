@@ -1,7 +1,14 @@
 import { randomUUID } from 'node:crypto';
 import type { AppDatabase } from '../db';
 import { publish } from '../bus';
-import { runIntentOnText, runExplore, runDraft, persistDraft, runPrdPatchFromContext } from './nodes';
+import {
+	runIntentOnText,
+	runIntentOnManualPrompt,
+	runExplore,
+	runDraft,
+	persistDraft,
+	runPrdPatchFromContext
+} from './nodes';
 import { getEnv } from '../config';
 import { ensureCodeExploreReady } from './explore-preflight';
 import { StateGraph, END, START, Annotation } from '@langchain/langgraph';
@@ -9,6 +16,11 @@ import { StateGraph, END, START, Annotation } from '@langchain/langgraph';
 const State = Annotation.Root({
 	utterance: Annotation<string>({ reducer: (x, y) => y ?? x, default: () => '' }),
 	sessionId: Annotation<string>({ reducer: (x, y) => y ?? x, default: () => 'default' }),
+	speakerId: Annotation<string | null>({ reducer: (_x, y) => y, default: () => null }),
+	intentMode: Annotation<'default' | 'hub_manual'>({
+		reducer: (x, y) => (y !== undefined ? y : x),
+		default: () => 'default'
+	}),
 	intent: Annotation<import('./types').IntentOutput | null>({ reducer: (_x, y) => y, default: () => null }),
 	rg: Annotation<
 		{ path: string; line: number; text: string; excerpt?: string }[] | null
@@ -28,8 +40,66 @@ function db(): AppDatabase {
 	return _db;
 }
 
+/** Live meeting speech often misclassified as noise when phrased as a problem report, not an explicit "please fix". */
+export function utteranceSuggestsTicketCue(utterance: string): boolean {
+	const compact = utterance.toLowerCase().replace(/\s+/g, ' ');
+	if (
+		/\bno problem\b/.test(compact) ||
+		/\bnot a problem\b/.test(compact) ||
+		/\bit's not a problem\b/.test(compact) ||
+		/\bits not a problem\b/.test(compact)
+	) {
+		return false;
+	}
+	const cues = [
+		/\bbug\b/,
+		/\bbroken\b/,
+		/\bcrash(ed|es|ing)?\b/,
+		/\berror\b/,
+		/\bexception\b/,
+		/\bdoesn'?t work\b/,
+		/\bdoes not work\b/,
+		/\bnot working\b/,
+		/\bwon'?t (work|open|load|save|connect)\b/,
+		/\bregression\b/,
+		/\bfail(s|ed|ing)?\b/,
+		/\bcan'?t\b/,
+		/\bunable to\b/,
+		/\bissue with\b/,
+		/\bproblem with\b/,
+		/\bsomething'?s wrong\b/,
+		/\bwrong (data|number|value|count)\b/,
+		/\bincorrect\b/,
+		/\btoo slow\b/,
+		/\bslow\b.*\b(load|page|screen|app)\b/,
+		/\bglitch/,
+		/\bconfus(ed|ing)\b/,
+		/\bspin(s|ning)?\b/,
+		/\bstuck (on|at|in|loading)\b/,
+		/\bhangs?\b/,
+		/\bcomplain/,
+		/\bfix this\b/,
+		/\bwe (need|should) to fix\b/,
+		/\bfile a ticket\b/,
+		/\btracking (a |an )?bug\b/
+	];
+	return cues.some((re) => re.test(compact));
+}
+
 async function nodeIntent(s: S): Promise<Partial<S>> {
-	const intent = await runIntentOnText(s.utterance, s.sessionId);
+	let intent =
+		s.intentMode === 'hub_manual'
+			? await runIntentOnManualPrompt(s.utterance, s.sessionId)
+			: await runIntentOnText(s.utterance, s.sessionId);
+	if (s.intentMode === 'hub_manual' && intent.category === 'noise') {
+		intent = { category: 'ticket', fileHints: [], alsoCreateTicket: false };
+	} else if (
+		s.intentMode === 'default' &&
+		intent.category === 'noise' &&
+		utteranceSuggestsTicketCue(s.utterance)
+	) {
+		intent = { ...intent, category: 'unclear' };
+	}
 	return { intent };
 }
 
@@ -72,7 +142,7 @@ async function nodeExplore(s: S): Promise<Partial<S>> {
 async function nodeDraft(s: S): Promise<Partial<S>> {
 	if (!s.intent) return {};
 	const rg = s.rg ?? [];
-	const d = await runDraft(s.utterance, s.intent, rg, s.sessionId);
+	const d = await runDraft(s.utterance, s.intent, rg, s.sessionId, s.speakerId);
 	if (!d) return {};
 	const id = persistDraft(db(), s.sessionId, d, { pendingPrdPatch: s.pendingPrdPatch });
 	return { draftId: id };
@@ -123,8 +193,14 @@ function compile(_database: AppDatabase) {
 /**
  * Main LangGraph entry.
  */
-export async function runPmGraph(input: { db: AppDatabase; sessionId: string; utterance: string }) {
-	const { db: database, sessionId, utterance } = input;
+export async function runPmGraph(input: {
+	db: AppDatabase;
+	sessionId: string;
+	utterance: string;
+	speakerId: string | null;
+	intentMode?: 'default' | 'hub_manual';
+}) {
+	const { db: database, sessionId, utterance, speakerId, intentMode = 'default' } = input;
 	// preflight env
 	getEnv();
 	if (!compiled) compile(database);
@@ -132,6 +208,8 @@ export async function runPmGraph(input: { db: AppDatabase; sessionId: string; ut
 	const out = await compiled!.invoke({
 		utterance,
 		sessionId,
+		speakerId,
+		intentMode,
 		intent: null,
 		rg: null,
 		pendingPrdPatch: null,

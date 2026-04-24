@@ -38,7 +38,11 @@ export function handleBridgeSocket(ws: WebSocket, req: IncomingMessage) {
 	const workspaceId = (u.searchParams.get('workspace') || 'default').trim() || 'default';
 	const st: State = { workspaceId, prdPath: '', projectRoot: '', ready: false };
 
-	const finish = (projectRoot: string, prdPath: string) => {
+	const finish = (
+		projectRoot: string,
+		prdPath: string,
+		linear?: { apiKey?: string; teamId?: string }
+	) => {
 		if (st.ready) return;
 		const p = pathSchema.safeParse({ PROJECT_ROOT: projectRoot, PRD_PATH: prdPath });
 		if (!p.success) {
@@ -52,7 +56,9 @@ export function handleBridgeSocket(ws: WebSocket, req: IncomingMessage) {
 			clientLabel: st.projectRoot,
 			projectRoot: st.projectRoot,
 			prdPath: st.prdPath,
-			accessToken: token
+			accessToken: token,
+			linearApiKey: linear?.apiKey,
+			linearTeamId: linear?.teamId
 		});
 		send(ws, {
 			type: 'bridge_ack',
@@ -83,7 +89,14 @@ export function handleBridgeSocket(ws: WebSocket, req: IncomingMessage) {
 		const pRoot = (j as { projectRoot?: string; prdPath?: string }).projectRoot;
 		const pPrd = (j as { projectRoot?: string; prdPath?: string }).prdPath;
 		if (typeof pRoot === 'string' && typeof pPrd === 'string' && pRoot && pPrd) {
-			finish(pRoot, pPrd);
+			const jo = j as { linearApiKey?: unknown; linearTeamId?: unknown };
+			const lk = typeof jo.linearApiKey === 'string' ? jo.linearApiKey.trim() : undefined;
+			const lt = typeof jo.linearTeamId === 'string' ? jo.linearTeamId.trim() : undefined;
+			const linear =
+				lk || lt
+					? { apiKey: lk || undefined, teamId: lt || undefined }
+					: undefined;
+			finish(pRoot, pPrd, linear);
 		}
 	};
 

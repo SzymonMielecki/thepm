@@ -30,6 +30,8 @@ export function realtimeSttQuery(): URLSearchParams {
 	q.set('model_id', model);
 	q.set('commit_strategy', 'vad');
 	q.set('audio_format', 'pcm_16000');
+	// Word-level payload includes speaker_id when the model provides diarization.
+	q.set('include_timestamps', 'true');
 	return q;
 }
 
@@ -57,7 +59,7 @@ export async function handleElevenFinalLine(params: {
 		text: text.trim()
 	});
 	try {
-		await runPmGraph({ db, sessionId: sid, utterance: text.trim() });
+		await runPmGraph({ db, sessionId: sid, utterance: text.trim(), speakerId });
 	} catch (e) {
 		publish({
 			type: 'agent_trace',

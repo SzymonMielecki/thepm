@@ -53,7 +53,7 @@ export function getEnv() {
 	}
 	return {
 		nodeEnv: process.env.NODE_ENV ?? 'development',
-		port: Number(process.env.PORT) || 3000,
+		port: Number(process.env.PORT) || 5173,
 		host: process.env.HOST ?? '0.0.0.0',
 		/** Single bridge workspace used by this hub (default: `default`). */
 		codeBridgeWorkspaceId: (process.env.CODE_BRIDGE_WORKSPACE_ID || 'default').trim() || 'default',

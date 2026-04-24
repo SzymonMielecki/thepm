@@ -16,7 +16,9 @@ const USAGE = `Usage: thepm bridge \\
   --project-root <path> \\
   --prd <path-to-PRD.md> \\
   [--token <BRIDGE_TOKEN>] \\
-  [--workspace <id>]     (default: default; must match hub CODE_BRIDGE_WORKSPACE_ID)
+  [--workspace <id>]     (default: default; must match hub CODE_BRIDGE_WORKSPACE_ID) \\
+  [--linear-api-key <key>] [--linear-team-id <uuid>]  (override hub LINEAR_* for this connection; \\
+                          alias: --lin-team-id)
 
 Example (run from the repo you are exposing):
   thepm bridge \\
@@ -42,7 +44,9 @@ const flagsSchema = z.object({
 	token: z.string().min(1, 'token must not be empty').optional(),
 	'project-root': z.string().min(1, 'project-root must not be empty'),
 	prd: z.string().min(1, 'prd must not be empty'),
-	workspace: z.string().min(1).default('default')
+	workspace: z.string().min(1).default('default'),
+	'linear-api-key': z.string().optional(),
+	'linear-team-id': z.string().optional()
 });
 
 function printUsage() {
@@ -59,6 +63,9 @@ function parseBridgeCli() {
 			'project-root': { type: 'string' },
 			prd: { type: 'string' },
 			workspace: { type: 'string' },
+			'linear-api-key': { type: 'string' },
+			'linear-team-id': { type: 'string' },
+			'lin-team-id': { type: 'string' },
 			help: { type: 'boolean', short: 'h' }
 		},
 		allowPositionals: false,
@@ -78,12 +85,16 @@ function parseBridgeCli() {
 		printUsage();
 		process.exit(1);
 	}
+	const teamFromBridge =
+		values['linear-team-id']?.trim() || values['lin-team-id']?.trim();
 	const raw = {
 		'hub-url': values['hub-url']!.trim(),
 		token: values.token?.trim(),
 		'project-root': values['project-root']!.trim(),
 		prd: values.prd!.trim(),
-		workspace: (values.workspace ?? 'default').trim() || 'default'
+		workspace: (values.workspace ?? 'default').trim() || 'default',
+		'linear-api-key': values['linear-api-key']?.trim(),
+		'linear-team-id': teamFromBridge
 	};
 	const f = flagsSchema.safeParse(raw);
 	if (!f.success) {
@@ -163,12 +174,17 @@ async function main() {
 		}
 	};
 	ws.on('open', () => {
-		send({
+		const hello: Record<string, unknown> = {
 			type: 'bridge_hello',
 			workspaceId: workspace,
 			projectRoot,
 			prdPath
-		});
+		};
+		const lk = f['linear-api-key']?.trim();
+		const lt = f['linear-team-id']?.trim();
+		if (lk) hello.linearApiKey = lk;
+		if (lt) hello.linearTeamId = lt;
+		send(hello);
 	});
 	ws.on('message', async (data) => {
 		let j: unknown;

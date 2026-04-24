@@ -12,16 +12,26 @@ import { publish } from '../bus';
 import { randomUUID } from 'node:crypto';
 import type { AppDatabase } from '../db';
 import { readPrdForHub } from '../prd/store';
+import { getOrCreateDatabase } from '../db';
+import { getSessionSpeakerProfile, resolveDraftAssigneeFromSpeaker } from '../speakers';
 
 const intentPrompt = `You are a product manager assistant. Classify the latest team utterance.
 The message may include the current root PRD (PRD.md) for context so you can align prd_update sections with existing headings.
-Return JSON only matching the schema. Use category "noise" for small talk.
-Use "ticket" when the primary ask is actionable engineering work, bugs, or implementation tasks (even if the PRD should stay in sync — the ticket path captures the work).
+Return JSON only matching the schema. Use category "noise" only for small talk, filler, or utterances with no product/engineering substance.
+Use "ticket" when the utterance describes or implies actionable engineering work: bugs, broken behavior, errors, regressions, missing features, refactors, performance issues, confusing UX, customer complaints about the product, or implementation tasks — including informal observations ("the login is busted", "why does this screen spin forever", "users hate this flow") even when nobody says "file a ticket" or "please fix".
+Use "unclear" when it sounds like a real product/engineering issue or request but details are thin; still prefer "ticket" if the problem or task is reasonably clear.
 Use "prd_update" when the primary ask is to change product scope, requirements, or documentation wording only.
 For prd_update, include prd hints as usual; PRD edits are applied only after explicit draft approval.
 Extract file or component name hints: for prd_update, add fileHints whenever the request touches specific code, features, or paths so the doc can be grounded in repo search.`;
 
-const draftPrompt = `You are a product manager. Given intent, the root PRD (if any), and any code context snippets, output JSON with title, description (markdown, include file refs as path:line), fileRefs, acceptance (strings), assigneeHint (optional, name only). Return JSON only.`;
+const manualIntentPrompt = `You are a product manager assistant. The user typed a task request in the hub UI (not live meeting chatter).
+Prefer category "ticket" for any engineering work, bug, feature, refactor, or implementation ask. Use "noise" only for empty or meaningless text.
+Use "prd_update" when they only want product doc / scope wording changed with no engineering task.
+The message may include the current root PRD (PRD.md) for context. Extract file, directory, component, or symbol hints in fileHints for repository search.
+Return JSON only matching the schema.`;
+
+const draftPrompt = `You are a product manager. Given intent, the root PRD (if any), and any code context snippets, output JSON with title, description (markdown, include file refs as path:line), fileRefs, acceptance (strings), assigneeHint (optional, name only). Return JSON only.
+If speaker profile context is present, treat it as the default owner for "I/we will do X" language unless a different person is explicitly named.`;
 
 const prdRefinePrompt = `You update the product requirements document (markdown). You receive the current PRD, the team utterance, optional first-pass target section/body from classification, and ripgrep/code snippets from the repository.
 Output JSON only: the section to update (heading text as in the PRD, e.g. "Goals" — match an existing H2+ title) and the new markdown body for that section only. Ground product claims in the code context when it supports the change; if code context is empty, still produce a consistent section update from the utterance and PRD.`;
@@ -56,6 +66,43 @@ export async function runIntentOnText(
 		: utterance;
 	return invokeWithStructuredZod(model, IntentOutputSchema, [
 		new SystemMessage(intentPrompt),
+		new HumanMessage(userContent)
+	]);
+}
+
+export async function runIntentOnManualPrompt(
+	utterance: string,
+	sessionId: string
+): Promise<IntentOutput> {
+	publish({
+		type: 'agent_trace',
+		phase: 'intent',
+		detail: `[hub manual] ${utterance.slice(0, 200)}`,
+		sessionId
+	});
+	const model = getChatModel();
+	let prdBlock = '';
+	try {
+		const full = await readPrdForHub();
+		if (full.trim()) {
+			prdBlock =
+				full.length > PRD_IN_PROMPT_MAX
+					? `${full.slice(0, PRD_IN_PROMPT_MAX)}\n\n[... PRD truncated for intent ...]`
+					: full;
+		}
+	} catch (e) {
+		publish({
+			type: 'agent_trace',
+			phase: 'intent_prd',
+			detail: `No PRD context: ${(e as Error).message}`,
+			sessionId
+		});
+	}
+	const userContent = prdBlock
+		? `Current root document (PRD.md):\n\n---\n${prdBlock}\n---\n\nTask request:\n\n${utterance}`
+		: utterance;
+	return invokeWithStructuredZod(model, IntentOutputSchema, [
+		new SystemMessage(manualIntentPrompt),
 		new HumanMessage(userContent)
 	]);
 }
@@ -98,7 +145,8 @@ export async function runDraft(
 	utterance: string,
 	intent: IntentOutput,
 	rg: { path: string; line: number; text: string; excerpt?: string }[],
-	sessionId: string
+	sessionId: string,
+	speakerId: string | null
 ): Promise<DraftTicket | null> {
 	const allowDraft =
 		intent.category === 'ticket' ||
@@ -107,6 +155,7 @@ export async function runDraft(
 	if (!allowDraft) return null;
 	publish({ type: 'agent_trace', phase: 'draft', detail: 'Composing ticket', sessionId });
 	const model = getChatModel();
+	const speakerProfile = getSessionSpeakerProfile(getOrCreateDatabase(), sessionId, speakerId);
 	let prdExcerpt = '';
 	try {
 		const p = await readPrdForHub();
@@ -128,13 +177,30 @@ export async function runDraft(
 	const blocks = [
 		`Utterance:\n${utterance}`,
 		`Intent JSON:\n${JSON.stringify(intent)}`,
+		speakerProfile
+			? `Speaker profile for this utterance:\n${JSON.stringify({
+					speakerId: speakerProfile.speakerId,
+					displayName: speakerProfile.displayName,
+					linearUserId: speakerProfile.linearUserId,
+					linearName: speakerProfile.linearName
+				})}`
+			: '',
 		prdExcerpt ? `Root PRD (PRD.md):\n${prdExcerpt}` : '',
 		`Code / ripgrep context:\n${codeCtx || '(none)'}`
 	].filter(Boolean);
-	return invokeWithStructuredZod(model, DraftTicketSchema, [
+	const draft = await invokeWithStructuredZod(model, DraftTicketSchema, [
 		new SystemMessage(draftPrompt),
 		new HumanMessage(blocks.join('\n\n'))
 	]);
+	const resolved = resolveDraftAssigneeFromSpeaker({
+		draftAssigneeHint: draft.assigneeHint,
+		profile: speakerProfile
+	});
+	return {
+		...draft,
+		assigneeHint: resolved.assigneeHint,
+		assigneeUserId: resolved.assigneeUserId
+	};
 }
 
 type PendingPrdPatch = { section: string; newBody: string };
@@ -147,13 +213,14 @@ export function persistDraft(
 ) {
 	const id = randomUUID();
 	db.prepare(
-		"INSERT INTO ticket_drafts (id, session_id, title, description, assignee_hint, state, prd_section, prd_body) VALUES (?,?,?,?,?,'pending',?,?)"
+		"INSERT INTO ticket_drafts (id, session_id, title, description, assignee_hint, assignee_user_id, state, prd_section, prd_body) VALUES (?,?,?,?,?,?,'pending',?,?)"
 	).run(
 		id,
 		sessionId,
 		d.title,
 		d.description,
 		d.assigneeHint ?? null,
+		d.assigneeUserId ?? null,
 		opts?.pendingPrdPatch?.section ?? null,
 		opts?.pendingPrdPatch?.newBody ?? null
 	);

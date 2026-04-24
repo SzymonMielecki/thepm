@@ -1,12 +1,15 @@
 <script lang="ts">
   import TranscriptFeed from "$lib/components/TranscriptFeed.svelte";
   import DraftQueue from "$lib/components/DraftQueue.svelte";
+  import SpeakersPanel from "$lib/components/SpeakersPanel.svelte";
   import PrdEditor from "$lib/components/PrdEditor.svelte";
   import AgentTrace from "$lib/components/AgentTrace.svelte";
   import ConnectedCapture from "$lib/components/ConnectedCapture.svelte";
   import ToastStack from "$lib/components/ToastStack.svelte";
+  import ExpandableBlockHeader from "$lib/components/ExpandableBlockHeader.svelte";
   import type { CaptureClientInfo } from "$lib/capture-types";
   import { onDestroy, onMount } from "svelte";
+  import { fade, fly } from "svelte/transition";
   import { browser } from "$app/environment";
   import { invalidateAll } from "$app/navigation";
   import type { PageData } from "./$types";
@@ -15,6 +18,7 @@
     clientHubTokenFromPageData,
     persistHubToken,
   } from "$lib/client/hub-token";
+  import { isStubOrEmptyPrd } from "$lib/prd/is-stub-or-empty";
 
   const AGENT_TRACES_STORAGE_KEY = "pm-hub:agent-traces-v1";
 
@@ -33,7 +37,32 @@
     title: string;
     description: string;
     state: string;
+    assigneeHint?: string | null;
+    assigneeUserId?: string | null;
+    linearIdentifier?: string | null;
+    linearUrl?: string | null;
   }[] = $state([]);
+  let speakerMappings = $state(
+    [] as {
+      sessionId: string;
+      speakerId: string;
+      displayName: string | null;
+      linearUserId: string | null;
+      linearName: string | null;
+      updatedAt: string;
+    }[],
+  );
+  let observedSpeakerIds = $state([] as string[]);
+  let speakerSessionId = $state<string | null>(null);
+  let linearUsers = $state([] as { id: string; name: string; email: string }[]);
+  let speakerNames = $derived.by(() => {
+    const out: Record<string, string> = {};
+    for (const m of speakerMappings) {
+      if (m.displayName?.trim()) out[m.speakerId] = m.displayName.trim();
+      else if (m.linearName?.trim()) out[m.speakerId] = m.linearName.trim();
+    }
+    return out;
+  });
   let captureDevices: CaptureClientInfo[] = $state([]);
   /** clientId → bar heights 0..1 for live capture waveform (SSE) */
   let captureWaveforms: Record<string, number[]> = $state({});
@@ -43,8 +72,23 @@
   let prdFilePath = $state("");
   /** True while the PRD textarea is focused — avoid SSE overwrites that reset the editor. */
   let prdEditing = $state(false);
+  /** Last PRD content known to match the file (load, save, or applied SSE). Used to detect unsaved edits. */
+  let prdSyncedContent = $state("");
+  /** With hub token: overlay PRD block while fetching or waiting for bridge PRD bootstrap. */
+  let prdBlockLoading = $state(false);
   let tokenDraft = $state("");
   let tokenModalOpen = $state(false);
+  let draftGenModalOpen = $state(false);
+  let draftGenPrompt = $state("");
+  let draftGenLoading = $state(false);
+  type HubExpandedPanel =
+    | "transcript"
+    | "drafts"
+    | "prd"
+    | "agent"
+    | "speakers"
+    | null;
+  let expandedHubPanel = $state<HubExpandedPanel>(null);
   let toasts = $state(
     [] as { id: number; kind: "success" | "error" | "info"; message: string }[],
   );
@@ -78,8 +122,17 @@
 
   async function parseApiError(response: Response) {
     try {
-      const body = (await response.json()) as { error?: string; detail?: string };
-      return body.detail || body.error || `Request failed (${response.status})`;
+      const body = (await response.json()) as {
+        error?: string;
+        detail?: string;
+        message?: string;
+      };
+      return (
+        body.detail ||
+        body.message ||
+        body.error ||
+        `Request failed (${response.status})`
+      );
     } catch {
       return `Request failed (${response.status})`;
     }
@@ -89,12 +142,25 @@
     prdLoadError = "";
     const r = await fetch("/api/prd", { headers: authHeader() });
     if (r.ok) {
-      const j = (await r.json()) as { content: string; prdFilePath?: string };
+      const j = (await r.json()) as {
+        content: string;
+        prdFilePath?: string;
+        prdBootstrap?: "off" | "if_empty" | "always";
+      };
       prd = j.content;
+      prdSyncedContent = j.content;
       if (j.prdFilePath) prdFilePath = j.prdFilePath;
       bridgeConnected = true;
+      const mode = j.prdBootstrap ?? "if_empty";
+      const stub = isStubOrEmptyPrd(j.content);
+      if (!stub || mode === "off") {
+        prdBlockLoading = false;
+      } else {
+        prdBlockLoading = true;
+      }
       return;
     }
+    prdBlockLoading = false;
     try {
       const j = (await r.json()) as { error?: string; detail?: string };
       if (j?.detail) {
@@ -113,8 +179,28 @@
   async function loadDrafts() {
     const r = await fetch("/api/tickets", { headers: authHeader() });
     if (r.ok) {
-      const j = (await r.json()) as { drafts: (typeof drafts)[0][] };
-      drafts = j.drafts;
+      const j = (await r.json()) as {
+        drafts: {
+          id: string;
+          title: string;
+          description: string;
+          state: string;
+          assignee_hint?: string | null;
+          assignee_user_id?: string | null;
+          linear_identifier?: string | null;
+          linear_url?: string | null;
+        }[];
+      };
+      drafts = j.drafts.map((d) => ({
+        id: d.id,
+        title: d.title,
+        description: d.description,
+        state: d.state,
+        assigneeHint: d.assignee_hint ?? null,
+        assigneeUserId: d.assignee_user_id ?? null,
+        linearIdentifier: d.linear_identifier ?? null,
+        linearUrl: d.linear_url ?? null,
+      }));
     }
   }
 
@@ -135,6 +221,55 @@
       captureDevices = j.devices;
     }
   }
+
+  async function loadSpeakerMappings() {
+    const r = await fetch("/api/speakers", { headers: authHeader() });
+    if (!r.ok) return;
+    const j = (await r.json()) as {
+      sessionId: string | null;
+      observedSpeakerIds: string[];
+      speakers: (typeof speakerMappings)[0][];
+    };
+    speakerSessionId = j.sessionId;
+    observedSpeakerIds = j.observedSpeakerIds ?? [];
+    speakerMappings = j.speakers ?? [];
+  }
+
+  async function loadLinearUsers() {
+    const r = await fetch("/api/linear/users", { headers: authHeader() });
+    if (!r.ok) return;
+    const j = (await r.json()) as { users: (typeof linearUsers)[0][] };
+    linearUsers = j.users ?? [];
+  }
+
+  async function saveSpeakerMapping(payload: {
+    sessionId: string;
+    speakerId: string;
+    displayName: string | null;
+    linearUserId: string | null;
+    linearName: string | null;
+  }) {
+    const r = await fetch("/api/speakers", {
+      method: "PATCH",
+      headers: { "content-type": "application/json", ...authHeader() },
+      body: JSON.stringify(payload),
+    });
+    if (!r.ok) {
+      pushToast("error", await parseApiError(r));
+      return;
+    }
+    pushToast("success", "Speaker mapping saved.");
+    await loadSpeakerMappings();
+  }
+
+  $effect(() => {
+    if (!browser || !expandedHubPanel) return;
+    const onEsc = (e: KeyboardEvent) => {
+      if (e.key === "Escape") expandedHubPanel = null;
+    };
+    window.addEventListener("keydown", onEsc);
+    return () => window.removeEventListener("keydown", onEsc);
+  });
 
   $effect(() => {
     if (!browser || !tracePersistenceReady) return;
@@ -162,11 +297,23 @@
               t: Date.now(),
             },
           ].slice(-200);
+          void loadSpeakerMappings();
         } else if (
           e.type === "agent_trace" ||
           (e as { type: string }).type === "stt" ||
           (e as { type: string }).type === "stt_partial"
         ) {
+          if (e.type === "agent_trace") {
+            const phase = (e as { phase?: string }).phase ?? "";
+            const detail = String((e as { detail?: string }).detail ?? "");
+            if (
+              phase === "prd_bootstrap" &&
+              detail &&
+              !detail.startsWith("start ")
+            ) {
+              prdBlockLoading = false;
+            }
+          }
           traces = [
             ...traces,
             {
@@ -178,8 +325,12 @@
           ].slice(-80);
         } else if (e.type === "prd") {
           const next = e.content as string;
+          if (prdBlockLoading && !isStubOrEmptyPrd(next)) {
+            prdBlockLoading = false;
+          }
           if (!prdEditing && next !== prd) {
             prd = next;
+            prdSyncedContent = next;
           }
         } else if (e.type === "prd_proposed") {
           const pe = e as unknown as { section: string; body: string };
@@ -235,12 +386,16 @@
     token = tokenDraft.trim();
     persistHubToken(token);
     tokenModalOpen = false;
-    pushToast("success", token ? "Bridge token saved." : "Bridge token cleared.");
+    pushToast(
+      "success",
+      token ? "Bridge token saved." : "Bridge token cleared.",
+    );
   }
 
   async function reconnectAndReload() {
     await loadPrd();
     await Promise.all([loadTranscripts(), loadCaptureClients()]);
+    await Promise.all([loadSpeakerMappings(), loadLinearUsers()]);
     connectSse();
     await invalidateAll();
     if (prdLoadError) {
@@ -251,6 +406,12 @@
   }
 
   async function refreshPrd() {
+    if (prd !== prdSyncedContent) {
+      const ok = confirm(
+        "You have unsaved edits to the PRD. Refresh loads the file from disk and discards those edits. Continue?",
+      );
+      if (!ok) return;
+    }
     await loadPrd();
     if (prdLoadError) {
       pushToast("error", `Refresh failed: ${prdLoadError}`);
@@ -271,7 +432,36 @@
     }
     const j = (await r.json()) as { content: string };
     prd = j.content;
+    prdSyncedContent = j.content;
     pushToast("success", "PRD saved.");
+  }
+
+  function openDraftGenModal() {
+    draftGenPrompt = "";
+    draftGenModalOpen = true;
+  }
+
+  async function submitDraftGen() {
+    const prompt = draftGenPrompt.trim();
+    if (!prompt || draftGenLoading) return;
+    draftGenLoading = true;
+    try {
+      const r = await fetch("/api/tickets/generate", {
+        method: "POST",
+        headers: { "content-type": "application/json", ...authHeader() },
+        body: JSON.stringify({ prompt }),
+      });
+      if (!r.ok) {
+        pushToast("error", await parseApiError(r));
+        return;
+      }
+      draftGenModalOpen = false;
+      draftGenPrompt = "";
+      pushToast("success", "Draft generated.");
+      await loadDrafts();
+    } finally {
+      draftGenLoading = false;
+    }
   }
 
   function isTypingTarget(t: EventTarget | null) {
@@ -299,7 +489,10 @@
               `Draft approved, but PRD update failed: ${payload.prdError}`,
             );
           } else if (payload.prdApplied) {
-            pushToast("success", "Draft approved, sent to Linear, and PRD updated.");
+            pushToast(
+              "success",
+              "Draft approved, sent to Linear, and PRD updated.",
+            );
           } else {
             pushToast("success", "Draft approved and sent to Linear.");
           }
@@ -347,12 +540,17 @@
     } catch {
       /* ignore */
     }
+    if (token.trim()) {
+      prdBlockLoading = true;
+    }
+    connectSse();
     void loadPrd();
     void loadDrafts();
     void (async () => {
       await loadTranscripts();
       await loadCaptureClients();
-      connectSse();
+      await loadSpeakerMappings();
+      await loadLinearUsers();
     })();
     window.addEventListener("keydown", onKey);
     hydrated = true;
@@ -364,25 +562,49 @@
       window.removeEventListener("keydown", onKey);
     }
   });
+
+  const hubExpandedShellClass =
+    "hub-expanded-in fixed z-50 flex max-h-[calc(100dvh-6.5rem)] min-h-0 flex-col gap-2 overflow-hidden rounded-xl bg-zinc-950/98 p-3 shadow-2xl sm:max-h-[calc(100dvh-7rem)] sm:p-4 left-[max(1.5rem,6vw)] right-[max(1.5rem,6vw)] top-[max(5.25rem,10vh)] bottom-[max(1.5rem,5vh)] sm:left-[max(2.25rem,8vw)] sm:right-[max(2.25rem,8vw)] sm:top-24 sm:bottom-[max(1.75rem,6vh)] md:left-[max(3rem,10vw)] md:right-[max(3rem,10vw)]";
 </script>
 
 <svelte:head>
   <title>thepm</title>
 </svelte:head>
 
-<div class="flex min-h-0 w-full min-w-0 flex-1 flex-col">
+<div
+  class="pointer-events-none fixed left-1/2 top-20 z-[100] flex w-[min(42rem,calc(100vw-1.5rem))] -translate-x-1/2 flex-col gap-2"
+  aria-live="polite"
+>
+  {#if !bridgeConnected}
+    <div
+      class="pointer-events-auto rounded border border-amber-600 bg-amber-950 px-3 py-2 text-sm text-amber-100 shadow-2xl"
+      in:fly={{ y: -10, duration: 200 }}
+      out:fly={{ y: -8, duration: 150 }}
+    >
+      <strong>Code bridge</strong> is not connected. The hub cannot read the
+      repo or PRD from your machine. Run
+      <code>thepm bridge --help</code> with the same <code>--hub-url</code>,
+      then paste the active bridge token (or open the printed
+      <code>bridge_session</code> URL), then click
+      <em>Reconnect / reload PRD</em>.
+    </div>
+  {/if}
+  {#if prdLoadError}
+    <div
+      class="pointer-events-auto rounded border border-rose-700 bg-rose-950 px-3 py-2 text-xs text-rose-50 shadow-2xl"
+      in:fly={{ y: -10, duration: 200 }}
+      out:fly={{ y: -8, duration: 150 }}
+    >
+      <strong>PRD</strong> could not be loaded: {prdLoadError}
+    </div>
+  {/if}
+</div>
+
+<div class="flex min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden">
   <header class="shrink-0 border-b border-zinc-800 px-4 py-3">
     <div class="flex flex-wrap items-center justify-between gap-3">
       <div>
         <h1 class="text-lg font-semibold tracking-tight">thepm</h1>
-        <p class="text-xs text-zinc-500">
-          Bridge-backed hub · <a
-            href="/mobile"
-            class="text-blue-400 hover:underline"
-            target="_blank"
-            rel="noopener noreferrer">Open mobile capture</a
-          >
-        </p>
       </div>
       <div class="flex flex-wrap items-center gap-2 text-xs">
         <span
@@ -391,22 +613,22 @@
               ? "border-emerald-500/40 text-emerald-200"
               : "border-zinc-700 text-zinc-500"
           }`}
-          >UI auth {data.bridgeSessionActive || hasUiAuth ? "active" : "inactive"}</span
+          >UI auth {data.bridgeSessionActive || hasUiAuth
+            ? "active"
+            : "inactive"}</span
         >
         <div class="flex flex-wrap items-center gap-1 text-zinc-500">
           <span>Bridge token</span>
           <button
             type="button"
             class="rounded border border-zinc-600 px-2 py-0.5 text-zinc-300"
-            onclick={openTokenModal}
-            >Edit</button
+            onclick={openTokenModal}>Edit</button
           >
           <button
             type="button"
             class="rounded border border-zinc-600 px-2 py-0.5 text-zinc-300"
             disabled={!token.trim()}
-            onclick={() => void copyHubToken()}
-            >Copy</button
+            onclick={() => void copyHubToken()}>Copy</button
           >
         </div>
         <button
@@ -418,31 +640,12 @@
         >
       </div>
     </div>
-    {#if !bridgeConnected}
-      <div
-        class="mt-2 rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-amber-200"
-      >
-        <strong>Code bridge</strong> is not connected. The hub cannot read the
-        repo or PRD from your machine. Run
-        <code>thepm bridge --help</code> with the same <code>--hub-url</code>,
-        then paste the active bridge token (or open the printed
-        <code>bridge_session</code> URL), then click
-        <em>Reconnect / reload PRD</em>.
-      </div>
-    {/if}
     {#if hydrated && !hasUiAuth}
       <div
         class="mt-2 rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-amber-200"
       >
         Open the dashboard using the <code>bridge_session</code> URL printed by
         <code>thepm bridge</code>, or paste the active bridge token above.
-      </div>
-    {/if}
-    {#if prdLoadError}
-      <div
-        class="mt-2 rounded border border-rose-500/40 bg-rose-500/10 px-2 py-1 text-rose-100 text-xs"
-      >
-        <strong>PRD</strong> could not be loaded: {prdLoadError}
       </div>
     {/if}
     {#if !data.flags.eleven}
@@ -456,7 +659,9 @@
       <div
         class="mt-2 rounded border border-amber-500/30 bg-amber-500/5 px-2 py-1 text-amber-100/90"
       >
-        <strong>LINEAR_API_KEY / LINEAR_TEAM_ID</strong> are required to push tickets.
+        <strong>LINEAR_API_KEY / LINEAR_TEAM_ID</strong> (or
+        <strong>--linear-api-key</strong> / <strong>--linear-team-id</strong> on
+        <strong>thepm</strong>) are required to push tickets.
       </div>
     {/if}
     {#if !data.flags.llm}
@@ -478,79 +683,291 @@
   </header>
 
   <main
-    class="grid min-h-0 w-full min-w-0 flex-1 grid-cols-1 grid-rows-[auto_auto_minmax(0,auto)_1fr] gap-2 p-2 lg:grid-cols-3 lg:grid-rows-[auto_auto_1fr]"
+    class="grid min-h-0 w-full min-w-0 flex-1 grid-cols-1 gap-2 overflow-hidden p-2 max-lg:grid-rows-[minmax(0,13rem)_minmax(0,13rem)_minmax(0,1fr)_minmax(0,28vh)] sm:max-lg:grid-rows-[minmax(0,15rem)_minmax(0,15rem)_minmax(0,1fr)_minmax(0,28vh)] lg:grid-cols-3 lg:grid-rows-[minmax(0,1fr)_minmax(0,1fr)_auto]"
   >
-    <section
-      class="flex h-52 min-h-0 max-lg:row-start-1 max-lg:row-end-2 flex-col sm:h-60 lg:col-start-1 lg:row-start-1 lg:row-end-3 lg:h-full lg:min-h-0"
+    <div
+      class="flex max-lg:row-start-1 max-lg:row-end-2 h-full min-h-0 min-w-0 w-full flex-col overflow-hidden lg:col-start-1 lg:row-start-1 lg:row-end-3"
     >
-      <TranscriptFeed lines={transcriptLines} />
-    </section>
-    <section
-      class="flex h-52 min-h-0 max-lg:row-start-2 max-lg:row-end-3 flex-col sm:h-60 lg:col-start-2 lg:row-start-1 lg:row-end-3 lg:h-full lg:min-h-0"
-    >
-      <DraftQueue
-        {drafts}
-        token={token ?? ""}
-        onupdate={loadDrafts}
-        ontoast={(
-          kind: "success" | "error" | "info",
-          message: string,
-        ) => pushToast(kind, message)}
-      />
-    </section>
-    <section
-      class="flex min-h-0 min-w-0 flex-col gap-2 overflow-hidden max-lg:min-h-[200px] max-lg:row-start-3 max-lg:row-end-4 lg:col-start-3 lg:row-start-1 lg:row-end-4"
-    >
-      {#if prdFilePath}
-        <p class="shrink-0 text-xs leading-snug text-zinc-500">
-          PRD content is read and written on the machine running <code
-            class="text-zinc-400">thepm bridge</code
-          > at the path above.
-        </p>
+      {#if expandedHubPanel === "transcript"}
+        <div
+          class="flex h-full min-h-0 w-full flex-col gap-2 lg:flex-1"
+          aria-hidden="true"
+        ></div>
       {/if}
-      <div class="min-h-0 flex-1 h-full">
-        <PrdEditor
-          bind:content={prd}
-          bind:proposed
-          bind:editing={prdEditing}
-          pathLabel={prdFilePath}
+      <section
+        class={expandedHubPanel === "transcript"
+          ? hubExpandedShellClass
+          : "flex h-full min-h-0 max-h-full w-full flex-col gap-2 overflow-hidden lg:min-h-0"}
+      >
+        <ExpandableBlockHeader
+          title="Transcript"
+          expanded={expandedHubPanel === "transcript"}
+          onexpand={() => (expandedHubPanel = "transcript")}
+          onclose={() => (expandedHubPanel = null)}
         />
-      </div>
-      <div class="flex shrink-0 flex-wrap justify-end gap-2">
-        <button
-          type="button"
-          class="rounded border border-zinc-600 px-2 py-1 text-xs text-zinc-300"
-          disabled={!bridgeConnected || !hasUiAuth}
-          onclick={() => {
-            void refreshPrd();
-          }}>Refresh</button
-        >
-        <button
-          type="button"
-          class="rounded bg-blue-600 px-2 py-1 text-xs font-medium text-white"
-          disabled={!bridgeConnected || !hasUiAuth}
-          onclick={() => {
-            void savePrd();
-          }}>Save PRD</button
-        >
-      </div>
-    </section>
-    <section
-      class="flex min-h-0 flex-col max-lg:row-start-4 max-lg:row-end-5 max-lg:min-h-0 lg:col-span-2 lg:row-start-3 lg:row-end-4"
+        <div class="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+          <TranscriptFeed
+            lines={transcriptLines}
+            {speakerNames}
+            frameless={expandedHubPanel === "transcript"}
+          />
+        </div>
+      </section>
+    </div>
+    <div
+      class="flex max-lg:row-start-2 max-lg:row-end-3 h-full min-h-0 min-w-0 w-full flex-col overflow-hidden lg:col-start-2 lg:row-start-1 lg:row-end-3"
     >
-      <p class="mb-1 shrink-0 text-xs text-zinc-500">
-        Agent trace (keyboard: a/r on first draft)
-      </p>
-      <div class="min-h-0 flex-1">
-        <AgentTrace {traces} />
+      {#if expandedHubPanel === "drafts"}
+        <div
+          class="flex h-full min-h-0 w-full flex-col gap-2 lg:flex-1"
+          aria-hidden="true"
+        ></div>
+      {/if}
+      <section
+        class={expandedHubPanel === "drafts"
+          ? hubExpandedShellClass
+          : "flex h-full min-h-0 max-h-full w-full flex-col gap-2 overflow-hidden lg:min-h-0"}
+      >
+        <ExpandableBlockHeader
+          title="Ticket drafts"
+          expanded={expandedHubPanel === "drafts"}
+          onexpand={() => (expandedHubPanel = "drafts")}
+          onclose={() => (expandedHubPanel = null)}
+        >
+          {#snippet trailing()}
+            <div class="flex flex-wrap items-center justify-end gap-2">
+              <button
+                type="button"
+                class="inline-flex h-7 shrink-0 items-center justify-center rounded bg-blue-600 px-2.5 text-xs font-medium leading-none text-white"
+                disabled={!bridgeConnected ||
+                  !hasUiAuth ||
+                  !data.flags.llm ||
+                  draftGenLoading}
+                onclick={openDraftGenModal}>Generate draft</button
+              >
+            </div>
+          {/snippet}
+        </ExpandableBlockHeader>
+        <div class="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+          <DraftQueue
+            {drafts}
+            token={token ?? ""}
+            onupdate={loadDrafts}
+            frameless={expandedHubPanel === "drafts"}
+            ontoast={(kind: "success" | "error" | "info", message: string) =>
+              pushToast(kind, message)}
+          />
+        </div>
+      </section>
+    </div>
+    <div
+      class="flex max-lg:row-start-3 max-lg:row-end-4 h-full min-h-0 min-w-0 w-full flex-col overflow-hidden lg:col-start-3 lg:row-start-1 lg:row-end-4"
+    >
+      {#if expandedHubPanel === "prd"}
+        <div
+          class="flex h-full min-h-0 min-w-0 w-full flex-col gap-2 lg:flex-1"
+          aria-hidden="true"
+        ></div>
+      {/if}
+      <section
+        class={expandedHubPanel === "prd"
+          ? hubExpandedShellClass
+          : "flex h-full min-h-0 max-h-full min-w-0 w-full flex-col gap-2 overflow-hidden lg:min-h-0"}
+      >
+        <ExpandableBlockHeader
+          title="PRD"
+          expanded={expandedHubPanel === "prd"}
+          onexpand={() => (expandedHubPanel = "prd")}
+          onclose={() => (expandedHubPanel = null)}
+        >
+          {#snippet trailing()}
+            <div class="flex flex-wrap items-center justify-end gap-2">
+              <button
+                type="button"
+                class="inline-flex h-7 shrink-0 items-center justify-center rounded border border-zinc-600 px-2.5 text-xs leading-none text-zinc-300"
+                disabled={!bridgeConnected || !hasUiAuth}
+                onclick={() => {
+                  void refreshPrd();
+                }}>Refresh</button
+              >
+              <button
+                type="button"
+                class="inline-flex h-7 shrink-0 items-center justify-center rounded bg-blue-600 px-2.5 text-xs font-medium leading-none text-white"
+                disabled={!bridgeConnected || !hasUiAuth}
+                onclick={() => {
+                  void savePrd();
+                }}>Save PRD</button
+              >
+            </div>
+          {/snippet}
+        </ExpandableBlockHeader>
+        <div class="relative h-full min-h-0 flex-1">
+          {#if prdBlockLoading && hasUiAuth}
+            <div
+              class="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 rounded-lg border border-zinc-800 bg-zinc-950/90 px-4 text-center"
+              role="status"
+              aria-live="polite"
+              aria-busy="true"
+            >
+              <div
+                class="h-8 w-8 shrink-0 animate-spin rounded-full border-2 border-zinc-600 border-t-blue-500"
+              ></div>
+              <p class="text-xs text-zinc-400">Loading PRD…</p>
+            </div>
+          {/if}
+          <div
+            class={prdBlockLoading && hasUiAuth
+              ? "pointer-events-none h-full min-h-0 opacity-40"
+              : "h-full min-h-0"}
+          >
+            <PrdEditor
+              bind:content={prd}
+              bind:proposed
+              bind:editing={prdEditing}
+              pathLabel={prdFilePath}
+              frameless={expandedHubPanel === "prd"}
+            />
+          </div>
+        </div>
+      </section>
+    </div>
+    <section
+      class="grid min-h-0 w-full min-w-0 gap-2 max-lg:h-full max-lg:max-h-full max-lg:min-h-0 max-lg:overflow-hidden max-lg:row-start-4 max-lg:row-end-5 lg:col-span-2 lg:row-start-3 lg:row-end-4 lg:h-[30vh] lg:min-h-[30vh] lg:max-h-[30vh] lg:grid-cols-2"
+    >
+      <div
+        class="relative flex h-full min-h-0 max-h-full w-full min-w-0 flex-col lg:h-[30vh] lg:min-h-[30vh] lg:max-h-[30vh]"
+      >
+        {#if expandedHubPanel === "agent"}
+          <div
+            class="flex h-full min-h-0 max-h-full flex-col gap-2 lg:h-[30vh] lg:min-h-[30vh] lg:max-h-[30vh]"
+            aria-hidden="true"
+          >
+            <div class="h-6 shrink-0"></div>
+            <div class="min-h-0 flex-1"></div>
+          </div>
+        {/if}
+        <div
+          class={expandedHubPanel === "agent"
+            ? hubExpandedShellClass
+            : "flex h-full min-h-0 w-full min-w-0 flex-col gap-2"}
+        >
+          <ExpandableBlockHeader
+            title="Agent trace"
+            expanded={expandedHubPanel === "agent"}
+            onexpand={() => (expandedHubPanel = "agent")}
+            onclose={() => (expandedHubPanel = null)}
+          />
+          <div
+            class={expandedHubPanel === "agent"
+              ? "min-h-0 flex-1"
+              : "min-h-0 flex-1 overflow-hidden"}
+          >
+            <AgentTrace
+              {traces}
+              frameless={expandedHubPanel === "agent"}
+            />
+          </div>
+        </div>
+      </div>
+      <div
+        class="relative flex h-full min-h-0 max-h-full w-full min-w-0 flex-col lg:h-[30vh] lg:min-h-[30vh] lg:max-h-[30vh]"
+      >
+        {#if expandedHubPanel === "speakers"}
+          <div
+            class="flex h-full min-h-0 max-h-full flex-col gap-2 lg:h-[30vh] lg:min-h-[30vh] lg:max-h-[30vh]"
+            aria-hidden="true"
+          >
+            <div class="h-6 shrink-0"></div>
+            <div class="min-h-0 flex-1"></div>
+          </div>
+        {/if}
+        <div
+          class={expandedHubPanel === "speakers"
+            ? hubExpandedShellClass
+            : "flex h-full min-h-0 w-full min-w-0 flex-col gap-2"}
+        >
+          <ExpandableBlockHeader
+            title="Speakers"
+            expanded={expandedHubPanel === "speakers"}
+            onexpand={() => (expandedHubPanel = "speakers")}
+            onclose={() => (expandedHubPanel = null)}
+          />
+          <div
+            class={expandedHubPanel === "speakers"
+              ? "min-h-0 flex-1"
+              : "min-h-0 flex-1 overflow-hidden"}
+          >
+            <SpeakersPanel
+              sessionId={speakerSessionId}
+              {observedSpeakerIds}
+              mappings={speakerMappings}
+              {linearUsers}
+              frameless={expandedHubPanel === "speakers"}
+              onsave={saveSpeakerMapping}
+            />
+          </div>
+        </div>
       </div>
     </section>
   </main>
 </div>
 
+{#if expandedHubPanel}
+  <div
+    class="fixed inset-0 z-40 bg-black/55 backdrop-blur-[1px]"
+    role="presentation"
+    aria-hidden="true"
+    transition:fade={{ duration: 180 }}
+    onclick={() => (expandedHubPanel = null)}
+  ></div>
+{/if}
+
+{#if draftGenModalOpen}
+  <div
+    class="fixed inset-0 z-40 flex items-center justify-center bg-black/70 p-4"
+  >
+    <div
+      class="w-full max-w-xl rounded-lg border border-zinc-700 bg-zinc-900 p-4"
+    >
+      <h2 class="text-sm font-semibold text-zinc-100">Generate task draft</h2>
+      <p class="mt-1 text-xs text-zinc-500">
+        Describe the task. The agent uses your PRD and repository search (via
+        the code bridge) for context.
+      </p>
+      <textarea
+        class="mt-3 h-32 w-full rounded border border-zinc-700 bg-zinc-950 p-2 text-sm text-zinc-100"
+        bind:value={draftGenPrompt}
+        placeholder="e.g. Add error handling when the tickets API returns 422…"
+        disabled={draftGenLoading}
+        autocomplete="off"
+      ></textarea>
+      <div class="mt-3 flex justify-end gap-2">
+        <button
+          type="button"
+          class="rounded border border-zinc-600 px-2 py-1 text-xs text-zinc-300"
+          disabled={draftGenLoading}
+          onclick={() => {
+            draftGenModalOpen = false;
+          }}>Cancel</button
+        >
+        <button
+          type="button"
+          class="rounded bg-blue-600 px-2 py-1 text-xs font-medium text-white disabled:opacity-50"
+          disabled={draftGenLoading || !draftGenPrompt.trim()}
+          onclick={() => void submitDraftGen()}>Generate</button
+        >
+      </div>
+    </div>
+  </div>
+{/if}
+
 {#if tokenModalOpen}
-  <div class="fixed inset-0 z-40 flex items-center justify-center bg-black/70 p-4">
-    <div class="w-full max-w-xl rounded-lg border border-zinc-700 bg-zinc-900 p-4">
+  <div
+    class="fixed inset-0 z-40 flex items-center justify-center bg-black/70 p-4"
+  >
+    <div
+      class="w-full max-w-xl rounded-lg border border-zinc-700 bg-zinc-900 p-4"
+    >
       <h2 class="text-sm font-semibold text-zinc-100">Edit bridge token</h2>
       <p class="mt-1 text-xs text-zinc-500">
         Token is shown in plain text and saved in this browser.

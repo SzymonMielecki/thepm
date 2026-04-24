@@ -4,6 +4,7 @@ import { callBridge } from '../code-bridge/bridge-registry';
 import { getEnv } from '../config';
 import { getOrCreateDatabase } from '../db';
 import { publish } from '../bus';
+import { isStubOrEmptyPrd } from '$lib/prd/is-stub-or-empty';
 import { writePrdWithRevision } from './store';
 import { z } from 'zod';
 
@@ -18,24 +19,6 @@ const MAX_CTX = 20_000;
 const bootstrapPrompt = `You write a product requirements document (PRD) in GitHub-flavored Markdown, grounded in the evidence provided (file lists, manifests, README, search hits). Do not invent features not suggested by the repo; use an "Open questions" section for gaps. Standard sections: title (#), Vision, Goals, Technical overview, Features / scope (inferred from structure), Non-goals, Decisions, Risks, Open questions. Be concise.`;
 
 const inFlight = new Set<string>();
-
-/** Heuristic: default stub from getPrdContent or nearly empty. */
-export function isStubOrEmptyPrd(text: string): boolean {
-	const t = text.replace(/\r\n/g, '\n').trim();
-	if (t.length < 32) return true;
-	if (
-		/^# Product Requirements \(Root\)\s*\n+\s*## Vision\s*\n+\s*## Goals\s*\n+\s*## Decisions\s*\n*$/i.test(
-			t
-		)
-	) {
-		return true;
-	}
-	// very short, likely placeholder
-	if (t.length < 200 && !/feature|user story|stakeholder|api\b/i.test(t)) {
-		return true;
-	}
-	return false;
-}
 
 export type PrdContextOps = {
 	listDir: (path: string) => Promise<{ name: string; isDir: boolean }[]>;
@@ -207,6 +190,12 @@ async function runPrdAutoBootstrap(
 	}
 
 	if (!markdown.length) {
+		publish({
+			type: 'agent_trace',
+			phase: 'prd_bootstrap',
+			detail: 'LLM returned empty PRD',
+			sessionId: traceSession
+		});
 		return;
 	}
 

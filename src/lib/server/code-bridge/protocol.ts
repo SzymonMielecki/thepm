@@ -22,8 +22,13 @@ export type CodeResMessage =
 export type BridgeHelloMessage = {
 	type: 'bridge_hello';
 	workspaceId: string;
+	projectRoot?: string;
+	prdPath?: string;
 	/** e.g. basename of project root */
 	clientLabel?: string;
+	/** From bridge CLI; hub merges with LINEAR_* env. */
+	linearApiKey?: string;
+	linearTeamId?: string;
 };
 
 export type PrdPatchBridgeResult = {

@@ -21,13 +21,18 @@ const args = process.argv.slice(2);
 
 function printHelp() {
 	console.log(`Usage:
-  thepm, thepm start   Run the hub (HTTP + /mobile PWA, WebSockets) — see server.ts
+  thepm, thepm start   Run the hub (HTTP + /mobile PWA, WebSockets) — default http://0.0.0.0:5173 (override PORT)
   thepm bridge --…     Outbound code bridge to a remote hub (same flags as thepm-bridge)
+
+Linear (optional; overrides LINEAR_* from .env):
+  --linear-api-key <key>
+  --linear-team-id <team>   (Linear team UUID)
 
 Environment: set THEPM_ROOT to this repository if the script is copied outside the project.
 When installed globally, the hub uses your current working directory as the project root for code/PRD unless PROJECT_ROOT is set.
 
 For local development with Vite, use: npm run dev / pnpm dev
+  Pass Linear flags after -- :  pnpm dev -- --linear-api-key … --linear-team-id …
 For production: npm run build && thepm
 `);
 }

@@ -2,8 +2,7 @@ import { json, type RequestEvent } from '@sveltejs/kit';
 import { getOrCreateDatabase } from '$lib/server/db';
 import { assertHubToken } from '$lib/server/auth';
 import { error } from '@sveltejs/kit';
-import { findUserIdByNameHint, createIssueFromDraft } from '$lib/server/linear';
-import { getEnv } from '$lib/server/config';
+import { findUserIdByNameHint, createIssueFromDraft, isLinearApiConfigured } from '$lib/server/linear';
 import { publish } from '$lib/server/bus';
 import { applyPrdPatch } from '$lib/server/prd/store';
 export const POST = async (event: RequestEvent) => {
@@ -12,8 +11,8 @@ export const POST = async (event: RequestEvent) => {
 	} catch {
 		return error(401, 'unauthorized');
 	}
-	if (!getEnv().linearApiKey) {
-		return error(503, 'LINEAR_API_KEY is not configured');
+	if (!isLinearApiConfigured()) {
+		return error(503, 'LINEAR_API_KEY is not configured (hub env or bridge --linear-api-key)');
 	}
 	const id = event.params.id;
 	if (!id) return error(400, 'id');
@@ -27,6 +26,7 @@ export const POST = async (event: RequestEvent) => {
 				title: string;
 				description: string;
 				assignee_hint: string | null;
+				assignee_user_id: string | null;
 				prd_section: string | null;
 				prd_body: string | null;
 				state: string;
@@ -36,7 +36,7 @@ export const POST = async (event: RequestEvent) => {
 	if (row.state !== 'pending') {
 		return json({ ok: true, already: true });
 	}
-	const assignee = await findUserIdByNameHint(row.assignee_hint);
+	const assignee = row.assignee_user_id ?? (await findUserIdByNameHint(row.assignee_hint));
 	const created = await createIssueFromDraft({
 		title: row.title,
 		description: row.description,

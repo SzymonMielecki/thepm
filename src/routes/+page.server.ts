@@ -1,5 +1,6 @@
 import { getEnv, type HubTokenMode } from '$lib/server/config';
 import { isBridgeReady } from '$lib/server/code-bridge/code-backend';
+import { isLinearApiConfigured } from '$lib/server/linear';
 import type { PageServerLoad } from './$types';
 
 type IndexPageData = {
@@ -26,7 +27,7 @@ export const load: PageServerLoad = async ({ locals }): Promise<IndexPageData> =
 		bridgeSessionActive: !!locals.bridgeSessionActive,
 		flags: {
 			eleven: !!e.elevenlabsApiKey,
-			linear: !!e.linearApiKey,
+			linear: isLinearApiConfigured(),
 			llm: hasLlm,
 			ripgrep: ripgrepOk
 		}

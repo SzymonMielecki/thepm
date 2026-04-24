@@ -30,10 +30,24 @@ CREATE TABLE IF NOT EXISTS ticket_drafts (
 	title TEXT NOT NULL,
 	description TEXT NOT NULL,
 	assignee_hint TEXT,
+	assignee_user_id TEXT,
 	prd_section TEXT,
 	prd_body TEXT,
 	state TEXT NOT NULL DEFAULT 'pending',
 	created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Session-scoped speaker identity + Linear mapping
+CREATE TABLE IF NOT EXISTS session_speakers (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	session_id TEXT NOT NULL REFERENCES sessions (id) ON DELETE CASCADE,
+	speaker_id TEXT NOT NULL,
+	display_name TEXT,
+	linear_user_id TEXT,
+	linear_name TEXT,
+	created_at TEXT NOT NULL DEFAULT (datetime('now')),
+	updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+	UNIQUE (session_id, speaker_id)
 );
 
 -- Created Linear issues
@@ -67,3 +81,4 @@ CREATE TABLE IF NOT EXISTS agent_traces (
 CREATE INDEX IF NOT EXISTS idx_transcripts_session ON transcripts (session_id);
 CREATE INDEX IF NOT EXISTS idx_drafts_session ON ticket_drafts (session_id);
 CREATE INDEX IF NOT EXISTS idx_traces_session ON agent_traces (session_id);
+CREATE INDEX IF NOT EXISTS idx_session_speakers_session ON session_speakers (session_id);

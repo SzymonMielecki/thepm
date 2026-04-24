@@ -9,6 +9,7 @@
 import { config } from 'dotenv';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { applyLinearCliEnvFromArgv } from './linear-cli-env';
 
 const installRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 
@@ -22,3 +23,5 @@ if (projectBase !== installRoot) {
 	config({ path: resolve(projectBase, '.env') });
 	config({ path: resolve(projectBase, '.env.local'), override: true });
 }
+
+applyLinearCliEnvFromArgv(process.argv);

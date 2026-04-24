@@ -6,7 +6,7 @@ import { handler } from './build/handler.js';
 import { attachAudioWssToHttpServer } from './src/lib/server/ws/ingest.ts';
 import { attachBridgeWssToHttpServer } from './src/lib/server/ws/bridge-ws.ts';
 
-const port = Number(process.env.PORT) || 3000;
+const port = Number(process.env.PORT) || 5173;
 const host = process.env.HOST || '0.0.0.0';
 
 function lanHttpOrigins(p: number): string[] {

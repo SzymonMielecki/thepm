@@ -3,6 +3,6 @@
 	let { children } = $props();
 </script>
 
-<div class="flex min-h-dvh flex-col">
+<div class="flex h-dvh max-h-dvh min-h-0 flex-col overflow-hidden">
 	{@render children()}
 </div>

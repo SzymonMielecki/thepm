@@ -47,7 +47,8 @@ export const DraftTicketSchema = z.object({
 	description: z.string(),
 	fileRefs: z.array(z.string()).default([]),
 	acceptance: z.array(z.string()).default([]),
-	assigneeHint: z.string().optional()
+	assigneeHint: z.string().optional(),
+	assigneeUserId: z.string().optional()
 });
 
 export type DraftTicket = z.infer<typeof DraftTicketSchema>;

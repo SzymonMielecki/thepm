@@ -49,10 +49,11 @@ export function handleBrowserSocket(ws: WebSocket, req: IncomingMessage) {
 				onEvent: async (e: SttEvent) => {
 					if (e.type === 'final') {
 						const sid = e.sessionId && e.sessionId !== 'default' ? e.sessionId : session;
+						const speakerId = e.speakerId ?? `capture:${clientId}`;
 						await handleElevenFinalLine({
 							sessionId: getOrCreateSessionId(db, sid),
 							text: e.text,
-							speakerId: e.speakerId
+							speakerId
 						});
 					} else if (e.type === 'error') {
 						publish({ type: 'agent_trace', phase: 'stt', detail: e.message, sessionId: session });
@@ -116,7 +117,7 @@ export function handleBrowserSocket(ws: WebSocket, req: IncomingMessage) {
 					await handleElevenFinalLine({
 						sessionId: getOrCreateSessionId(db, j.sessionId ?? session),
 						text: j.text,
-						speakerId: null
+						speakerId: `capture:${clientId}`
 					});
 					ws.send(JSON.stringify({ type: 'final_acked' }));
 				} catch (e) {

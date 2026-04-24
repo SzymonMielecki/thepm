@@ -19,6 +19,9 @@ type BridgeEntry = {
 	prdPath?: string;
 	projectRoot?: string;
 	accessToken?: string;
+	/** Optional; from bridge CLI — override hub env for this workspace. */
+	linearApiKey?: string;
+	linearTeamId?: string;
 };
 
 const bridges = new Map<string, BridgeEntry>();
@@ -42,7 +45,14 @@ function safeSend(ws: WsType, obj: object) {
 export function registerBridgeConnection(
 	workspaceId: string,
 	ws: WsType,
-	opts?: { clientLabel?: string; prdPath?: string; projectRoot?: string; accessToken?: string }
+	opts?: {
+		clientLabel?: string;
+		prdPath?: string;
+		projectRoot?: string;
+		accessToken?: string;
+		linearApiKey?: string;
+		linearTeamId?: string;
+	}
 ): BridgeUiSession {
 	const old = bridges.get(workspaceId);
 	if (old && old.ws !== ws) {
@@ -57,12 +67,27 @@ export function registerBridgeConnection(
 		lastLabel: opts?.clientLabel,
 		prdPath: opts?.prdPath,
 		projectRoot: opts?.projectRoot,
-		accessToken: opts?.accessToken
+		accessToken: opts?.accessToken,
+		linearApiKey: opts?.linearApiKey?.trim() || undefined,
+		linearTeamId: opts?.linearTeamId?.trim() || undefined
 	});
 	return issueBridgeUiSession(workspaceId);
 }
 
 /** Active bridge client paths (from last `bridge_hello`) for a workspace, if connected. */
+/** Bridge-supplied Linear overrides for this workspace (merged with hub env in `linear.ts`). */
+export function getBridgeLinearOverrides(workspaceId: string): {
+	linearApiKey?: string;
+	linearTeamId?: string;
+} {
+	const e = bridges.get(workspaceId);
+	if (!e || e.ws.readyState !== WebSocket.OPEN) return {};
+	const out: { linearApiKey?: string; linearTeamId?: string } = {};
+	if (e.linearApiKey) out.linearApiKey = e.linearApiKey;
+	if (e.linearTeamId) out.linearTeamId = e.linearTeamId;
+	return out;
+}
+
 export function getBridgeClientPaths(
 	workspaceId: string
 ): { projectRoot: string; prdPath: string } | null {

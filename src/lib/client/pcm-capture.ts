@@ -33,10 +33,12 @@ function levelsFromMonoF32(m: Float32Array, bars: number): number[] {
 	return out;
 }
 
-function cat16(a: Int16Array, b: Int16Array): Int16Array {
-	if (a.length === 0) return b;
-	if (b.length === 0) return a;
-	const c = new Int16Array(a.length + b.length);
+type I16Buf = Int16Array<ArrayBuffer>;
+
+function cat16(a: Int16Array, b: Int16Array): I16Buf {
+	if (a.length === 0) return new Int16Array(b) as I16Buf;
+	if (b.length === 0) return new Int16Array(a) as I16Buf;
+	const c = new Int16Array(a.length + b.length) as I16Buf;
 	c.set(a, 0);
 	c.set(b, a.length);
 	return c;
@@ -98,24 +100,40 @@ export async function startPcm16kCapture(
 	const inRate = context.sampleRate;
 	const source = context.createMediaStreamSource(stream);
 	const bufferSize = 4096;
-	// Two inputs: capture stereo mics; we downmix in software.
-	const proc = context.createScriptProcessor(bufferSize, 2, 1);
+	const track = stream.getAudioTracks()[0];
+	const settings = track?.getSettings?.() ?? {};
+	const reportedCh =
+		typeof settings.channelCount === 'number' && settings.channelCount > 0
+			? settings.channelCount
+			: typeof source.channelCount === 'number' && source.channelCount > 0
+				? source.channelCount
+				: 1;
+	/**
+	 * Use only channel 0. Averaging L/R mixed two physical mics when the OS exposed a stereo stream.
+	 * ChannelSplitter avoids implicit stereo→mono downmix in the graph doing the same blend.
+	 */
+	const inCh = reportedCh;
+	const proc = context.createScriptProcessor(bufferSize, 1, 1);
 	const gain = context.createGain();
 	gain.gain.value = 0;
-	let acc = new Int16Array(0);
+	let splitter: ChannelSplitterNode | null = null;
+	let acc: I16Buf = new Int16Array(0) as I16Buf;
 	let lastWave = 0;
+
+	if (inCh > 1) {
+		splitter = context.createChannelSplitter(inCh);
+		source.connect(splitter);
+		splitter.connect(proc, 0, 0);
+	} else {
+		source.connect(proc);
+	}
 
 	proc.onaudioprocess = (e) => {
 		const input = e.inputBuffer;
 		const n = input.length;
 		const ch0 = input.getChannelData(0);
-		const ch1 = input.numberOfChannels > 1 ? input.getChannelData(1) : null;
 		const mono = new Float32Array(n);
-		for (let i = 0; i < n; i++) {
-			const a = ch0[i] ?? 0;
-			const b = ch1 ? (ch1[i] ?? 0) : a;
-			mono[i] = ch1 ? (a + b) * 0.5 : a;
-		}
+		mono.set(ch0);
 		if (onWaveform) {
 			const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
 			if (now - lastWave >= WAVE_MIN_MS) {
@@ -129,11 +147,13 @@ export async function startPcm16kCapture(
 		while (acc.length >= CHUNK_SAMPLES) {
 			const part = acc.subarray(0, CHUNK_SAMPLES);
 			onChunk(i16ToBase64(part));
-			acc = acc.length > CHUNK_SAMPLES ? acc.subarray(CHUNK_SAMPLES) : new Int16Array(0);
+			acc =
+				acc.length > CHUNK_SAMPLES
+					? (new Int16Array(acc.subarray(CHUNK_SAMPLES)) as I16Buf)
+					: (new Int16Array(0) as I16Buf);
 		}
 	};
 
-	source.connect(proc);
 	proc.connect(gain);
 	gain.connect(context.destination);
 
@@ -142,10 +162,15 @@ export async function startPcm16kCapture(
 			proc.onaudioprocess = null;
 			if (acc.length > 0) {
 				onChunk(i16ToBase64(acc));
-				acc = new Int16Array(0);
+				acc = new Int16Array(0) as I16Buf;
 			}
 			try {
 				source.disconnect();
+			} catch {
+				// ignore
+			}
+			try {
+				splitter?.disconnect();
 			} catch {
 				// ignore
 			}
