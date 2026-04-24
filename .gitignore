@@ -11,3 +11,4 @@ dist
 *.log
 data
 .cursor
+pnpm-lock.yaml
