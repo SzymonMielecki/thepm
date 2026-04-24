@@ -5,7 +5,6 @@ import type { PageServerLoad } from './$types';
 
 type IndexPageData = {
 	bridgeReady: boolean;
-	bridgeSessionActive: boolean;
 	flags: { eleven: boolean; linear: boolean; llm: boolean; ripgrep: boolean };
 };
 
@@ -20,7 +19,6 @@ export const load: PageServerLoad = async ({ locals }): Promise<IndexPageData> =
 				: !!e.anthropicApiKey;
 	return {
 		bridgeReady: ripgrepOk,
-		bridgeSessionActive: !!locals.bridgeSessionActive,
 		flags: {
 			eleven: !!e.elevenlabsApiKey,
 			linear: isLinearApiConfigured(),

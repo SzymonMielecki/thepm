@@ -11,7 +11,6 @@
   import { onDestroy, onMount } from "svelte";
   import { fade, fly } from "svelte/transition";
   import { browser } from "$app/environment";
-  import { invalidateAll } from "$app/navigation";
   import type { PageData } from "./$types";
   import type { HubPageDataFields } from "$lib/types/hub-ui";
   import {
@@ -393,19 +392,6 @@
     );
   }
 
-  async function reconnectAndReload() {
-    await loadPrd();
-    await Promise.all([loadTranscripts(), loadCaptureClients()]);
-    await Promise.all([loadSpeakerMappings(), loadLinearUsers()]);
-    connectSse();
-    await invalidateAll();
-    if (prdLoadError) {
-      pushToast("error", `Reconnect failed: ${prdLoadError}`);
-      return;
-    }
-    pushToast("success", "Reconnected and reloaded.");
-  }
-
   async function refreshPrd() {
     if (prd !== prdSyncedContent) {
       const ok = confirm(
@@ -531,8 +517,7 @@
       repo or PRD from your machine. Run
       <code>thepm bridge --help</code> with the same <code>--hub-url</code>,
       then paste the active bridge token (or open the printed
-      <code>bridge_session</code> URL), then click
-      <em>Reconnect / reload PRD</em>.
+      <code>bridge_session</code> URL), then refresh this page to reconnect.
     </div>
   {/if}
   {#if prdLoadError}
@@ -553,16 +538,6 @@
         <h1 class="text-lg font-semibold tracking-tight">thepm</h1>
       </div>
       <div class="flex flex-wrap items-center gap-2 text-xs">
-        <span
-          class={`rounded border px-2 py-0.5 ${
-            data.bridgeSessionActive || hasUiAuth
-              ? "border-emerald-500/40 text-emerald-200"
-              : "border-zinc-700 text-zinc-500"
-          }`}
-          >UI auth {data.bridgeSessionActive || hasUiAuth
-            ? "active"
-            : "inactive"}</span
-        >
         <div class="flex flex-wrap items-center gap-1 text-zinc-500">
           <span>Bridge token</span>
           <button
@@ -577,13 +552,6 @@
             onclick={() => void copyHubToken()}>Copy</button
           >
         </div>
-        <button
-          type="button"
-          class="rounded border border-zinc-600 px-2 py-0.5 text-zinc-300"
-          onclick={() => {
-            void reconnectAndReload();
-          }}>Reconnect / reload PRD</button
-        >
       </div>
     </div>
     {#if hydrated && !hasUiAuth}
