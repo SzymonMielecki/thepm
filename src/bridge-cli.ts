@@ -168,6 +168,23 @@ async function main() {
 	}
 	let reportedConnRefused = false;
 	const ws = new WebSocket(url);
+	ws.on('unexpected-response', (_req, res) => {
+		const c = res.statusCode ?? 0;
+		if (c === 404) {
+			// eslint-disable-next-line no-console
+			console.error(
+				'[thepm-bridge] The hub at this URL has no /api/bridge WebSocket (HTTP 404 on upgrade). ' +
+					'Vercel and similar serverless deploys do not run the Node hub that attaches the bridge. ' +
+					'Build and start the hub from this same repo: `pnpm build && thepm` (or `pnpm dev`); use the printed origin in `--hub-url`, or use a long-lived host that runs `server.ts`.\n' +
+					'  (If you are sure the hub is the Node process, the site may be the wrong app or a stale deployment.)'
+			);
+		} else {
+			// eslint-disable-next-line no-console
+			console.error(
+				`[thepm-bridge] WebSocket upgrade failed: HTTP ${c} ${res.statusMessage || ''}`.trim()
+			);
+		}
+	});
 	const send = (o: object) => {
 		if (ws.readyState === WebSocket.OPEN) {
 			ws.send(JSON.stringify(o));
