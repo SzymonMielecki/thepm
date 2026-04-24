@@ -17,7 +17,7 @@ export const POST = async (event: RequestEvent) => {
 		.from('ticket_drafts')
 		.select('title, state')
 		.eq('id', id)
-		.maybeSingle();
+		.maybeSingle<{ title: string; state: string }>();
 	if (qErr) return error(500, qErr.message);
 	if (!row) return error(404, 'not found');
 	const { error: upErr } = await db.from('ticket_drafts').update({ state: 'rejected' }).eq('id', id);

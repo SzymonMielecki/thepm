@@ -92,7 +92,18 @@
     } else if (r.status === 401) {
       feedError = "Bridge token rejected (check it matches an active bridge connection).";
     } else {
-      feedError = `Transcript request failed (${r.status})`;
+      let detail = "";
+      try {
+        const j = (await r.json()) as { error?: string; hint?: string };
+        if (typeof j.error === "string") detail = j.error;
+        if (typeof j.hint === "string")
+          detail = detail ? `${detail} ${j.hint}` : j.hint;
+      } catch {
+        /* plain text or empty body */
+      }
+      feedError = detail
+        ? `Transcript request failed (${r.status}): ${detail}`
+        : `Transcript request failed (${r.status})`;
     }
   }
 

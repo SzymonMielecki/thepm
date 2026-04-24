@@ -6,7 +6,7 @@ export async function getOrCreateSessionId(
 	id: string | null | undefined
 ): Promise<string> {
 	if (id) {
-		const { data } = await db.from('sessions').select('id').eq('id', id).maybeSingle();
+		const { data } = await db.from('sessions').select('id').eq('id', id).maybeSingle<{ id: string }>();
 		if (data) return data.id;
 	}
 	const nid = randomUUID();

@@ -11,14 +11,14 @@ async function resolveHubSessionId(db: AppDatabase): Promise<string> {
 		.select('session_id')
 		.order('id', { ascending: false })
 		.limit(1)
-		.maybeSingle();
+		.maybeSingle<{ session_id: string }>();
 	if (fromTx) return fromTx.session_id;
 	const { data: fromDraft } = await db
 		.from('ticket_drafts')
 		.select('session_id')
 		.order('created_at', { ascending: false })
 		.limit(1)
-		.maybeSingle();
+		.maybeSingle<{ session_id: string }>();
 	if (fromDraft) return fromDraft.session_id;
 	return getOrCreateSessionId(db, undefined);
 }

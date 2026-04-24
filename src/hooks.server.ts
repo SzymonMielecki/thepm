@@ -7,9 +7,16 @@ import { isBridgeUiSessionTokenValid } from '$lib/server/code-bridge/bridge-regi
 
 const BRIDGE_SESSION_COOKIE = 'thepm_bridge_session';
 
+let storageLogDone = false;
 let ready = false;
 function boot() {
 	if (ready) return;
+	if (!storageLogDone) {
+		storageLogDone = true;
+		console.log(
+			'[thepm] Hub storage: local SQLite (`.thepm/hub.db`). Override path with THEPM_SQLITE_PATH if needed.'
+		);
+	}
 	const db = getOrCreateDatabase();
 	const { prdPath, projectRoot } = getProjectPaths();
 	initPrdStore(db, prdPath, projectRoot);

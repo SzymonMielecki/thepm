@@ -260,6 +260,7 @@
     }
     pushToast("success", "Speaker mapping saved.");
     await loadSpeakerMappings();
+    await loadDrafts();
   }
 
   $effect(() => {
@@ -464,57 +465,6 @@
     }
   }
 
-  function isTypingTarget(t: EventTarget | null) {
-    const n = t as HTMLElement | null;
-    const name = n?.tagName;
-    return name === "INPUT" || name === "TEXTAREA" || n?.isContentEditable;
-  }
-
-  function onKey(e: KeyboardEvent) {
-    if (isTypingTarget(e.target)) return;
-    if (e.key === "a" && drafts[0]?.state === "pending") {
-      if (e.metaKey) return;
-      void fetch(`/api/tickets/${drafts[0]!.id}/approve`, {
-        method: "POST",
-        headers: authHeader(),
-      }).then(async (r) => {
-        if (r.ok) {
-          const payload = (await r.json()) as {
-            prdApplied?: boolean;
-            prdError?: string | null;
-          };
-          if (payload.prdError) {
-            pushToast(
-              "error",
-              `Draft approved, but PRD update failed: ${payload.prdError}`,
-            );
-          } else if (payload.prdApplied) {
-            pushToast(
-              "success",
-              "Draft approved, sent to Linear, and PRD updated.",
-            );
-          } else {
-            pushToast("success", "Draft approved and sent to Linear.");
-          }
-          return loadDrafts();
-        }
-        pushToast("error", `Approve failed (${r.status}).`);
-      });
-    }
-    if (e.key === "r" && drafts[0]?.state === "pending") {
-      void fetch(`/api/tickets/${drafts[0]!.id}/reject`, {
-        method: "POST",
-        headers: authHeader(),
-      }).then((r) => {
-        if (r.ok) {
-          pushToast("success", "Draft rejected.");
-          return loadDrafts();
-        }
-        pushToast("error", `Reject failed (${r.status}).`);
-      });
-    }
-  }
-
   onMount(() => {
     try {
       const raw = sessionStorage.getItem(AGENT_TRACES_STORAGE_KEY);
@@ -552,15 +502,11 @@
       await loadSpeakerMappings();
       await loadLinearUsers();
     })();
-    window.addEventListener("keydown", onKey);
     hydrated = true;
   });
 
   onDestroy(() => {
     eventSrc?.close();
-    if (browser) {
-      window.removeEventListener("keydown", onKey);
-    }
   });
 
   const hubExpandedShellClass =

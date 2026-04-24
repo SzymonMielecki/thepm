@@ -1,8 +1,5 @@
 import { createHash } from 'node:crypto';
-import { resolve, dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
+import { resolve } from 'node:path';
 
 const HUB_TOKEN_DERIVE_PREFIX = 'thepm:hubToken:v1:';
 
@@ -93,4 +90,3 @@ export function getProjectPaths() {
 	return { projectRoot, prdPath };
 }
 
-export const serverRoot = join(__dirname, '../../../..');

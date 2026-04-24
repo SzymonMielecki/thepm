@@ -1,5 +1,13 @@
 import type { AppDatabase } from './db';
 
+type SessionSpeakerRow = {
+	session_id: string;
+	speaker_id: string;
+	display_name: string | null;
+	linear_user_id: string | null;
+	linear_name: string | null;
+};
+
 export type SessionSpeakerProfile = {
 	sessionId: string;
 	speakerId: string;
@@ -19,7 +27,7 @@ export async function getSessionSpeakerProfile(
 		.select('session_id, speaker_id, display_name, linear_user_id, linear_name')
 		.eq('session_id', sessionId)
 		.eq('speaker_id', speakerId)
-		.maybeSingle();
+		.maybeSingle<SessionSpeakerRow>();
 	if (!row) return null;
 	return {
 		sessionId: row.session_id,

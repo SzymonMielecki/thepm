@@ -24,4 +24,9 @@ if (projectBase !== installRoot) {
 	config({ path: resolve(projectBase, '.env.local'), override: true });
 }
 
+/** Process working directory (e.g. `pnpm start` from the repo) wins over a wrong `import.meta` install path. */
+const cwd = process.cwd();
+config({ path: resolve(cwd, '.env') });
+config({ path: resolve(cwd, '.env.local'), override: true });
+
 applyLinearCliEnvFromArgv(process.argv);

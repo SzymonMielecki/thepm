@@ -209,12 +209,13 @@ export async function persistDraft(
 	db: AppDatabase,
 	sessionId: string,
 	d: DraftTicket,
-	opts?: { pendingPrdPatch?: PendingPrdPatch | null }
+	opts?: { pendingPrdPatch?: PendingPrdPatch | null; speakerId?: string | null }
 ) {
 	const id = randomUUID();
 	const { error } = await db.from('ticket_drafts').insert({
 		id,
 		session_id: sessionId,
+		speaker_id: opts?.speakerId ?? null,
 		title: d.title,
 		description: d.description,
 		assignee_hint: d.assigneeHint ?? null,

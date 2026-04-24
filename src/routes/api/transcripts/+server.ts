@@ -23,7 +23,11 @@ export const GET = async (event: RequestEvent) => {
 		.select('speaker_id, text, created_at')
 		.order('id', { ascending: false })
 		.limit(limit);
-	if (qErr) return error(500, qErr.message);
+	if (qErr) {
+		const msg = qErr.message;
+		console.error('[thepm] GET /api/transcripts failed:', msg);
+		return json({ lines: [], error: msg }, { status: 500 });
+	}
 	const lines = (rows ?? []).reverse().map((r) => ({
 		speakerId: r.speaker_id,
 		text: r.text,

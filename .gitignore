@@ -12,3 +12,4 @@ dist
 data
 .cursor
 pnpm-lock.yaml
+.dist

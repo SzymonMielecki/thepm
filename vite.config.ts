@@ -1,8 +1,16 @@
+import { readFileSync } from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import "./src/lib/server/load-dotenv";
 import { sveltekit } from "@sveltejs/kit/vite";
 import tailwindcss from "@tailwindcss/vite";
 import { defineConfig } from "vitest/config";
+
+const viteDir = path.dirname(fileURLToPath(import.meta.url));
+const INIT_MIGRATION_SQL = readFileSync(
+	path.join(viteDir, "src/lib/server/migrations/001_init.sql"),
+	"utf-8"
+);
 
 /** PRD is written by the hub/agent; watching it triggers a full Vite reload and wipes client state. */
 function prdPathsToIgnoreInDevWatch(): string[] {
@@ -22,6 +30,10 @@ function prdPathsToIgnoreInDevWatch(): string[] {
 }
 
 export default defineConfig({
+  define: {
+    /** Inlined into SSR/client bundles so `readFileSync` is not needed at runtime in `build/`. */
+    __THEPM_INIT_SQL__: JSON.stringify(INIT_MIGRATION_SQL),
+  },
   // Tailscale Funnel and other local proxies expect something listening; match
   // `tailscale funnel <port>` to this port (default 5173 with `npm run dev`).
   server: {

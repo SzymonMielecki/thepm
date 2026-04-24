@@ -20,7 +20,7 @@ async function resolveSessionId(db: AppDatabase, event: RequestEvent): Promise<s
 		.select('session_id')
 		.order('id', { ascending: false })
 		.limit(1)
-		.maybeSingle();
+		.maybeSingle<{ session_id: string }>();
 	return latest?.session_id ?? null;
 }
 
@@ -48,7 +48,8 @@ export const GET = async (event: RequestEvent) => {
 		.not('speaker_id', 'is', null);
 	if (obErr) return error(500, obErr.message);
 	const seen = new Set<string>();
-	for (const r of observedSpeakerIds ?? []) {
+	const observed = (observedSpeakerIds ?? []) as { speaker_id: string | null }[];
+	for (const r of observed) {
 		if (r.speaker_id) seen.add(r.speaker_id);
 	}
 
@@ -100,6 +101,26 @@ export const PATCH = async (event: RequestEvent) => {
 		{ onConflict: 'session_id,speaker_id' }
 	);
 	if (upErr) return error(500, upErr.message);
+
+	const assigneeUserId = linearUserId;
+	const assigneeHint = linearUserId
+		? (linearName?.trim() || displayName || null)
+		: (displayName || null);
+	const { data: pendingIds, error: dErr } = await db
+		.from('ticket_drafts')
+		.select('id')
+		.eq('session_id', sessionId)
+		.eq('speaker_id', speakerId)
+		.eq('state', 'pending');
+	if (dErr) return error(500, dErr.message);
+	for (const row of pendingIds ?? []) {
+		const id = (row as { id: string }).id;
+		const { error: pErr } = await db
+			.from('ticket_drafts')
+			.update({ assignee_hint: assigneeHint, assignee_user_id: assigneeUserId })
+			.eq('id', id);
+		if (pErr) return error(500, pErr.message);
+	}
 
 	return json({ ok: true });
 };

@@ -1,8 +1,19 @@
-import { readFileSync, mkdirSync, existsSync } from 'node:fs';
+import { mkdirSync, existsSync, readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import type Database from 'better-sqlite3';
-import { projectBaseDir, serverRoot } from './config';
+import { projectBaseDir } from './config';
+
+function loadInitMigrationSql(): string {
+	if (typeof __THEPM_INIT_SQL__ === 'string' && __THEPM_INIT_SQL__.length > 0) {
+		return __THEPM_INIT_SQL__;
+	}
+	return readFileSync(
+		fileURLToPath(new URL('./migrations/001_init.sql', import.meta.url)),
+		'utf-8'
+	);
+}
 
 function defaultSqlitePath(): string {
 	const override = (process.env.THEPM_SQLITE_PATH ?? '').trim();
@@ -25,9 +36,17 @@ function isDbEmpty(db: Database.Database): boolean {
 
 function runInitialMigrationIfNeeded(db: Database.Database) {
 	if (!isDbEmpty(db)) return;
-	const path = join(serverRoot, 'src/lib/server/migrations/001_init.sql');
-	const sql = readFileSync(path, 'utf-8');
-	db.exec(sql);
+	db.exec(loadInitMigrationSql());
+}
+
+function ensureTicketDraftsSpeakerIdColumn(db: Database.Database) {
+	try {
+		const cols = db.prepare(`PRAGMA table_info("ticket_drafts")`).all() as { name: string }[];
+		if (cols.some((c) => c.name === 'speaker_id')) return;
+		db.exec(`ALTER TABLE "ticket_drafts" ADD COLUMN speaker_id TEXT`);
+	} catch {
+		// ignore: table missing in odd states
+	}
 }
 
 export type LocalFromResult<T> = { data: T | null; error: { message: string } | null };
@@ -40,7 +59,7 @@ class LocalQuery {
 	private _limit?: number;
 	private _wheres: { col: string; op: 'eq' | 'not_null'; val?: unknown }[] = [];
 
-	/** Supabase client is thenable for `.select()...` chains that end without `maybeSingle` */
+	/** PostgREST-style builder is thenable for `.select()...` chains that end without `maybeSingle` */
 	then<TResult1 = LocalFromResult<Record<string, unknown>[]>, TResult2 = never>(
 		onfulfilled?:
 			| ((
@@ -278,6 +297,7 @@ export function openLocalHubDatabase(): LocalHubDatabase {
 	if (!existed || isDbEmpty(db)) {
 		runInitialMigrationIfNeeded(db);
 	}
+	ensureTicketDraftsSpeakerIdColumn(db);
 	return {
 		__isLocal: true,
 		from: (t: string) => new LocalFromBuilder(db, t)

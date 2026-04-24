@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS transcripts (
 CREATE TABLE IF NOT EXISTS ticket_drafts (
 	id TEXT PRIMARY KEY,
 	session_id TEXT NOT NULL REFERENCES sessions (id) ON DELETE CASCADE,
+	speaker_id TEXT,
 	title TEXT NOT NULL,
 	description TEXT NOT NULL,
 	assignee_hint TEXT,

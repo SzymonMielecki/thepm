@@ -144,7 +144,10 @@ async function nodeDraft(s: S): Promise<Partial<S>> {
 	const rg = s.rg ?? [];
 	const d = await runDraft(s.utterance, s.intent, rg, s.sessionId, s.speakerId);
 	if (!d) return {};
-	const id = await persistDraft(db(), s.sessionId, d, { pendingPrdPatch: s.pendingPrdPatch });
+	const id = await persistDraft(db(), s.sessionId, d, {
+		pendingPrdPatch: s.pendingPrdPatch,
+		speakerId: s.speakerId
+	});
 	return { draftId: id };
 }
 
