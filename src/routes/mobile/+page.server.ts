@@ -1,19 +1,13 @@
-import type { HubTokenMode } from '$lib/server/config';
-import { isBridgeReady } from '$lib/server/code-bridge/code-backend';
+import { redirect } from '@sveltejs/kit';
 import type { PageServerLoad } from './$types';
 
-type MobilePageData = {
-	hubToken: string;
-	hubTokenMode: HubTokenMode;
-	bridgeReady: boolean;
-	bridgeSessionActive: boolean;
-};
+const RECORDER = '/recorder' as const;
 
-export const load: PageServerLoad = async ({ locals }): Promise<MobilePageData> => {
-	return {
-		hubToken: '',
-		hubTokenMode: 'open',
-		bridgeReady: isBridgeReady(),
-		bridgeSessionActive: !!locals.bridgeSessionActive
-	};
+/**
+ * @deprecated The recorder PWA lives at `/recorder`. Old links and the PWA manifest
+ * can keep `/mobile` for compatibility.
+ */
+export const load: PageServerLoad = async ({ url }) => {
+	const q = url.search;
+	throw redirect(308, q ? `${RECORDER}${q}` : RECORDER);
 };

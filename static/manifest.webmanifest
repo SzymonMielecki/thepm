@@ -1,7 +1,7 @@
 {
 	"name": "Always-On AI PM",
 	"short_name": "PM Hub",
-	"start_url": "/mobile",
+	"start_url": "/recorder",
 	"display": "standalone",
 	"background_color": "#0a0a0a",
 	"theme_color": "#0a0a0a",

@@ -20,6 +20,7 @@
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
     "@sveltejs/adapter-node": "^5.2.12",
     "@sveltejs/adapter-vercel": "^5.10.3",
     "@sveltejs/kit": "^2.20.0",
@@ -37,6 +38,7 @@
     "vitest": "^3.0.0"
   },
   "dependencies": {
+    "better-sqlite3": "^11.9.0",
     "@langchain/anthropic": "^0.3.14",
     "@langchain/community": "0.3.49",
     "@langchain/core": "^0.3.40",

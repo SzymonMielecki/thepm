@@ -7,7 +7,6 @@
     hubTokenToWsSubprotocol,
   } from "$lib/client/hub-ws";
   import TranscriptFeed from "$lib/components/TranscriptFeed.svelte";
-  import ToastStack from "$lib/components/ToastStack.svelte";
   import type { PageData } from "./$types";
   import type { HubPageDataFields } from "$lib/types/hub-ui";
   import {
@@ -30,10 +29,7 @@
   let pendingManual: string | null = null;
   let tokenDraft = $state("");
   let tokenModalOpen = $state(false);
-  let toasts = $state(
-    [] as { id: number; kind: "success" | "error" | "info"; message: string }[],
-  );
-  let nextToastId = 1;
+  let notice = $state("");
   let hasUiAuth = $derived(!!token.trim());
 
   const wsPath = "/api/audio/stream";
@@ -41,27 +37,30 @@
   let ws: WebSocket | null = null;
   let pcm: PcmCapture | null = null;
 
+  function showNotice(
+    text: string,
+    kind: "ok" | "err" = "ok",
+    timeoutMs = 2800,
+  ) {
+    if (!browser) return;
+    if (kind === "err") {
+      err = text;
+      setTimeout(() => {
+        if (err === text) err = "";
+      }, timeoutMs);
+    } else {
+      notice = text;
+      setTimeout(() => {
+        if (notice === text) notice = "";
+      }, timeoutMs);
+    }
+  }
+
   function authHeader() {
     return { Authorization: token ? `Bearer ${token}` : "" } as Record<
       string,
       string
     >;
-  }
-
-  function pushToast(
-    kind: "success" | "error" | "info",
-    message: string,
-    timeoutMs = 2800,
-  ) {
-    const id = nextToastId++;
-    toasts = [...toasts, { id, kind, message }];
-    setTimeout(() => {
-      dismissToast(id);
-    }, timeoutMs);
-  }
-
-  function dismissToast(id: number) {
-    toasts = toasts.filter((t) => t.id !== id);
   }
 
   function openTokenModal() {
@@ -73,7 +72,9 @@
     token = tokenDraft.trim();
     persistMobileHubToken(token);
     tokenModalOpen = false;
-    pushToast("success", token ? "Bridge token saved." : "Bridge token cleared.");
+    showNotice(
+      token ? "Bridge token saved." : "Bridge token cleared.",
+    );
   }
 
   async function loadTranscripts() {
@@ -152,10 +153,9 @@
     connectSse();
     startTranscriptPoll();
     if (feedError) {
-      pushToast("error", feedError);
       return;
     }
-    pushToast("success", "Live transcript connected.");
+    showNotice("Live transcript connected.");
   }
 
   function sendAudioChunk(b64: string) {
@@ -279,7 +279,6 @@
     if (!hasUiAuth) {
       err = "Bridge session or bridge token required";
       status = "error";
-      pushToast("error", err);
       return;
     }
     void reconnectFeed();
@@ -302,9 +301,7 @@
     }).catch((e) => {
       err = (e as Error).message;
       status = "error";
-      pushToast("error", `Record failed: ${err}`);
     });
-    // `err` is set on WS failure (status may not narrow for TS on `$state` here)
     if (err) return;
     try {
       const m = await navigator.mediaDevices.getUserMedia({
@@ -319,10 +316,9 @@
     } catch (e) {
       err = (e as Error).message || "Microphone error";
       status = "error";
-      pushToast("error", `Record failed: ${err}`);
       return;
     }
-    pushToast("success", "Recording started.");
+    showNotice("Recording started.");
   }
 
   function stop() {
@@ -331,7 +327,15 @@
     ws?.close();
     ws = null;
     status = "idle";
-    pushToast("info", "Recording stopped.");
+    showNotice("Recording stopped.", "ok", 2000);
+  }
+
+  function cleanupCapture() {
+    pcm?.stop();
+    pcm = null;
+    ws?.close();
+    ws = null;
+    status = "idle";
   }
 
   /** Text fallback when STT is unavailable (still routes through hub). */
@@ -340,13 +344,11 @@
       ?.value;
     if (!t?.trim()) {
       err = "Enter text to send";
-      pushToast("error", err);
       return;
     }
     const ok = await ensureWsForManual();
     if (!ok || !ws || ws.readyState !== WebSocket.OPEN) {
       err = err || "Could not connect to hub";
-      pushToast("error", err);
       return;
     }
     err = "";
@@ -359,19 +361,16 @@
       }),
     );
     (document.getElementById("manual-t") as HTMLInputElement).value = "";
-    pushToast("success", "Manual line sent.");
+    showNotice("Manual line sent.");
   }
 
   async function copyHubToken() {
     if (!token.trim()) return;
     try {
       await navigator.clipboard.writeText(token);
-      pushToast("success", "Bridge token copied.");
+      showNotice("Bridge token copied.");
     } catch (e) {
-      pushToast(
-        "error",
-        `Could not copy token: ${(e as Error).message || "clipboard unavailable"}`,
-      );
+      err = `Could not copy token: ${(e as Error).message || "clipboard unavailable"}`;
     }
   }
 
@@ -399,7 +398,7 @@
     }
     eventSrc?.close();
     eventSrc = null;
-    stop();
+    cleanupCapture();
   });
 </script>
 
@@ -409,6 +408,14 @@
 </svelte:head>
 
 <div class="mx-auto max-w-md space-y-4 p-4">
+  {#if notice}
+    <p
+      class="rounded border border-emerald-500/40 bg-emerald-500/10 px-2 py-1 text-sm text-emerald-100"
+      role="status"
+    >
+      {notice}
+    </p>
+  {/if}
   <h1 class="text-xl font-semibold">Table capture</h1>
   <p class="text-sm text-zinc-500">
     PWA: allow microphone. Use <code>tailscale funnel</code> for HTTPS on phones.
@@ -544,5 +551,3 @@
     </div>
   </div>
 {/if}
-
-<ToastStack {toasts} ondismiss={dismissToast} />

@@ -225,7 +225,7 @@ async function main() {
 					);
 					// eslint-disable-next-line no-console
 					console.log(
-						`[thepm-bridge] Open mobile:    ${uiUrlWithSession(hubUrl, '/mobile', sessionToken, hubToken)}`
+						`[thepm-bridge] Open recorder:    ${uiUrlWithSession(hubUrl, '/recorder', sessionToken, hubToken)}`
 					);
 					if (typeof sessionExpiresAt === 'number' && Number.isFinite(sessionExpiresAt)) {
 						// eslint-disable-next-line no-console
@@ -240,7 +240,7 @@ async function main() {
 				);
 				// eslint-disable-next-line no-console
 				console.log(
-					`[thepm-bridge] Open mobile (token):    ${uiUrlWithToken(hubUrl, '/mobile', hubToken)}`
+					`[thepm-bridge] Open recorder (token):    ${uiUrlWithToken(hubUrl, '/recorder', hubToken)}`
 				);
 			} else {
 				// eslint-disable-next-line no-console

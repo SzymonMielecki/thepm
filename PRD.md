@@ -21,7 +21,7 @@
 - **Package manager:** pnpm (with onlyBuiltDependencies for better-sqlite3)
 
 ### Architecture
-- **Hub process** (one per project context): serves `/` (dashboard), `/mobile` (PWA), `/api/events` (SSE), `/api/audio/stream` (WebSocket)
+- **Hub process** (one per project context): serves `/` (dashboard), `/recorder` (PWA), `/api/events` (SSE), `/api/audio/stream` (WebSocket)
 - **Bridge process** (per repository): runs `thepm bridge` from target repo, exposes code/PRD via secure token-based connection
 - **No separate mobile host:** mobile PWA served by same Node process as dashboard
 
@@ -34,7 +34,7 @@
 - Linear issue integration (create/view)
 - Real-time event stream (SSE)
 
-### Mobile PWA (`/mobile`)
+### Mobile PWA (`/recorder`; `/mobile` redirects for compatibility)
 - Responsive interface for phone/tablet
 - Microphone access (secure context: HTTPS or localhost)
 - Streaming audio input (WebSocket `/api/audio/stream`)
@@ -90,7 +90,7 @@
 3. **Linear integration scope:** does the hub create issues, update them, or both? Permissions model?
 4. **PRD bootstrap logic:** what triggers `if_empty` vs `always` vs `off`? How is the scan performed?
 5. **Mobile PWA offline support:** is there a service worker? Sync strategy for offline edits?
-6. **Scalability:** can one hub handle many concurrent `/mobile` clients? Any connection limits?
+6. **Scalability:** can one hub handle many concurrent `/recorder` clients? Any connection limits?
 7. **Bridge reconnection:** what happens if a bridge disconnects? Auto-reconnect, or manual re-run?
 8. **Audit/logging:** are bridge operations, LLM calls, or Linear changes logged? Where?
 9. **Testing coverage:** what does `vitest run` cover? Unit, integration, or e2e?

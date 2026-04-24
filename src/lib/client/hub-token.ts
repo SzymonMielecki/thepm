@@ -2,9 +2,9 @@ import type { HubPageDataFields } from '$lib/types/hub-ui';
 
 const LS_KEY = 'hubToken';
 
-export function clientHubTokenFromPageData(data: HubPageDataFields): string {
+export function clientHubTokenFromPageData(_data: HubPageDataFields): string {
 	if (typeof localStorage === 'undefined') {
-		return data.hubToken ?? '';
+		return '';
 	}
 	try {
 		const stored = localStorage.getItem(LS_KEY);
@@ -12,12 +12,12 @@ export function clientHubTokenFromPageData(data: HubPageDataFields): string {
 	} catch {
 		/* private mode, quota */
 	}
-	return data.hubToken ?? '';
+	return '';
 }
 
-export function initMobileHubToken(data: HubPageDataFields): string {
+export function initMobileHubToken(_data: HubPageDataFields): string {
 	if (typeof localStorage === 'undefined') {
-		return data.hubToken ?? '';
+		return '';
 	}
 	try {
 		const stored = localStorage.getItem(LS_KEY);
@@ -27,7 +27,7 @@ export function initMobileHubToken(data: HubPageDataFields): string {
 	} catch {
 		/* private mode, quota */
 	}
-	return data.hubToken ?? '';
+	return '';
 }
 
 export function persistMobileHubToken(token: string): void {

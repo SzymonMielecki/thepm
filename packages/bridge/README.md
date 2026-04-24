@@ -20,13 +20,13 @@ thepm bridge \
 ```
 
 If `--token` is omitted, the bridge generates a UUID token for this connection and prints it. `--workspace` must match the hub’s `CODE_BRIDGE_WORKSPACE_ID` (default: `default`).
-After connect, the bridge prints dashboard/mobile URLs for both:
+After connect, the bridge prints dashboard/recorder URLs for both:
 - short-lived `bridge_session` access, and
 - direct `?token=...` access (prefills the hub token input).
 
 Bridge deployment model:
 - One hub instance is paired with one project/repository context.
-- Many `/mobile` clients can use that same hub while this bridge is connected.
+- Many `/recorder` clients can use that same hub while this bridge is connected.
 
 ## System-wide (`thepm-bridge` on your PATH)
 
