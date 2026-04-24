@@ -1,18 +1,24 @@
 import { json, error, type RequestEvent } from '@sveltejs/kit';
 import { assertHubToken } from '$lib/server/auth';
-import { getOrCreateDatabase } from '$lib/server/db';
+import { getOrCreateDatabase, type AppDatabase } from '$lib/server/db';
 import { getOrCreateSessionId } from '$lib/server/session';
 import { runPmGraph } from '$lib/server/agent/graph';
 import { getEnv } from '$lib/server/config';
 
-function resolveHubSessionId(db: ReturnType<typeof getOrCreateDatabase>): string {
-	const fromTx = db
-		.prepare(`SELECT session_id FROM transcripts ORDER BY id DESC LIMIT 1`)
-		.get() as { session_id: string } | undefined;
+async function resolveHubSessionId(db: AppDatabase): Promise<string> {
+	const { data: fromTx } = await db
+		.from('transcripts')
+		.select('session_id')
+		.order('id', { ascending: false })
+		.limit(1)
+		.maybeSingle();
 	if (fromTx) return fromTx.session_id;
-	const fromDraft = db
-		.prepare(`SELECT session_id FROM ticket_drafts ORDER BY created_at DESC LIMIT 1`)
-		.get() as { session_id: string } | undefined;
+	const { data: fromDraft } = await db
+		.from('ticket_drafts')
+		.select('session_id')
+		.order('created_at', { ascending: false })
+		.limit(1)
+		.maybeSingle();
 	if (fromDraft) return fromDraft.session_id;
 	return getOrCreateSessionId(db, undefined);
 }
@@ -40,7 +46,7 @@ export const POST = async (event: RequestEvent) => {
 	}
 
 	const db = getOrCreateDatabase();
-	const sessionId = resolveHubSessionId(db);
+	const sessionId = await resolveHubSessionId(db);
 
 	try {
 		const out = await runPmGraph({

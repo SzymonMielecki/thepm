@@ -1,6 +1,7 @@
 import { json, error, type RequestEvent } from '@sveltejs/kit';
 import { assertHubToken } from '$lib/server/auth';
 import { getOrCreateDatabase } from '$lib/server/db';
+import type { AppDatabase } from '$lib/server/db';
 
 type SpeakerRow = {
 	session_id: string;
@@ -11,51 +12,49 @@ type SpeakerRow = {
 	updated_at: string;
 };
 
-function resolveSessionId(db: ReturnType<typeof getOrCreateDatabase>, event: RequestEvent): string | null {
+async function resolveSessionId(db: AppDatabase, event: RequestEvent): Promise<string | null> {
 	const explicit = event.url.searchParams.get('sessionId')?.trim();
 	if (explicit) return explicit;
-	const latest = db
-		.prepare(
-			`SELECT session_id AS sessionId
-			 FROM transcripts
-			 ORDER BY id DESC
-			 LIMIT 1`
-		)
-		.get() as { sessionId: string } | undefined;
-	return latest?.sessionId ?? null;
+	const { data: latest } = await db
+		.from('transcripts')
+		.select('session_id')
+		.order('id', { ascending: false })
+		.limit(1)
+		.maybeSingle();
+	return latest?.session_id ?? null;
 }
 
-export const GET = (event: RequestEvent) => {
+export const GET = async (event: RequestEvent) => {
 	try {
 		assertHubToken(event);
 	} catch {
 		return error(401, 'unauthorized');
 	}
 	const db = getOrCreateDatabase();
-	const sessionId = resolveSessionId(db, event);
+	const sessionId = await resolveSessionId(db, event);
 	if (!sessionId) return json({ sessionId: null, speakers: [], observedSpeakerIds: [] as string[] });
 
-	const speakers = db
-		.prepare(
-			`SELECT session_id, speaker_id, display_name, linear_user_id, linear_name, updated_at
-			 FROM session_speakers
-			 WHERE session_id = ?
-			 ORDER BY updated_at DESC`
-		)
-		.all(sessionId) as SpeakerRow[];
+	const { data: speakers, error: spErr } = await db
+		.from('session_speakers')
+		.select('session_id, speaker_id, display_name, linear_user_id, linear_name, updated_at')
+		.eq('session_id', sessionId)
+		.order('updated_at', { ascending: false });
+	if (spErr) return error(500, spErr.message);
 
-	const observedSpeakerIds = db
-		.prepare(
-			`SELECT DISTINCT speaker_id AS speakerId
-			 FROM transcripts
-			 WHERE session_id = ? AND speaker_id IS NOT NULL
-			 ORDER BY speaker_id`
-		)
-		.all(sessionId) as { speakerId: string }[];
+	const { data: observedSpeakerIds, error: obErr } = await db
+		.from('transcripts')
+		.select('speaker_id')
+		.eq('session_id', sessionId)
+		.not('speaker_id', 'is', null);
+	if (obErr) return error(500, obErr.message);
+	const seen = new Set<string>();
+	for (const r of observedSpeakerIds ?? []) {
+		if (r.speaker_id) seen.add(r.speaker_id);
+	}
 
 	return json({
 		sessionId,
-		speakers: speakers.map((s) => ({
+		speakers: (speakers as SpeakerRow[]).map((s) => ({
 			sessionId: s.session_id,
 			speakerId: s.speaker_id,
 			displayName: s.display_name,
@@ -63,7 +62,7 @@ export const GET = (event: RequestEvent) => {
 			linearName: s.linear_name,
 			updatedAt: s.updated_at
 		})),
-		observedSpeakerIds: observedSpeakerIds.map((x) => x.speakerId)
+		observedSpeakerIds: [...seen].sort()
 	});
 };
 
@@ -88,15 +87,19 @@ export const PATCH = async (event: RequestEvent) => {
 	const linearName = body.linearName?.trim() || null;
 
 	const db = getOrCreateDatabase();
-	db.prepare(
-		`INSERT INTO session_speakers (session_id, speaker_id, display_name, linear_user_id, linear_name, updated_at)
-		 VALUES (?,?,?,?,?, datetime('now'))
-		 ON CONFLICT(session_id, speaker_id) DO UPDATE SET
-			display_name = excluded.display_name,
-			linear_user_id = excluded.linear_user_id,
-			linear_name = excluded.linear_name,
-			updated_at = datetime('now')`
-	).run(sessionId, speakerId, displayName, linearUserId, linearName);
+	const now = new Date().toISOString();
+	const { error: upErr } = await db.from('session_speakers').upsert(
+		{
+			session_id: sessionId,
+			speaker_id: speakerId,
+			display_name: displayName,
+			linear_user_id: linearUserId,
+			linear_name: linearName,
+			updated_at: now
+		},
+		{ onConflict: 'session_id,speaker_id' }
+	);
+	if (upErr) return error(500, upErr.message);
 
 	return json({ ok: true });
 };

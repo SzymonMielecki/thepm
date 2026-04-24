@@ -3,32 +3,57 @@ import { getOrCreateDatabase } from '$lib/server/db';
 import { assertHubToken } from '$lib/server/auth';
 import { error } from '@sveltejs/kit';
 
-export const GET = (event: RequestEvent) => {
+type DraftRow = {
+	id: string;
+	session_id: string;
+	title: string;
+	description: string;
+	assignee_hint: string | null;
+	assignee_user_id: string | null;
+	state: string;
+	created_at: string;
+	linear_tickets: { linear_identifier: string | null; url: string | null }[] | null;
+};
+
+export const GET = async (event: RequestEvent) => {
 	try {
 		assertHubToken(event);
 	} catch {
 		return error(401, 'unauthorized');
 	}
 	const db = getOrCreateDatabase();
-	const rows = db
-		.prepare(
-			`SELECT d.id, d.session_id, d.title, d.description, d.assignee_hint, d.assignee_user_id, d.state, d.created_at,
-				lt.linear_identifier AS linear_identifier, lt.url AS linear_url
-			FROM ticket_drafts d
-			LEFT JOIN linear_tickets lt ON lt.draft_id = d.id
-			ORDER BY d.created_at DESC`
+	const { data: raw, error: qErr } = await db
+		.from('ticket_drafts')
+		.select(
+			`
+			id,
+			session_id,
+			title,
+			description,
+			assignee_hint,
+			assignee_user_id,
+			state,
+			created_at,
+			linear_tickets ( linear_identifier, url )
+		`
 		)
-		.all() as {
-			id: string;
-			session_id: string;
-			title: string;
-			description: string;
-			assignee_hint: string | null;
-			assignee_user_id: string | null;
-			state: string;
-			created_at: string;
-			linear_identifier: string | null;
-			linear_url: string | null;
-		}[];
-	return json({ drafts: rows });
+		.order('created_at', { ascending: false });
+	if (qErr) return error(500, qErr.message);
+	const rows = (raw ?? []) as DraftRow[];
+	const drafts = rows.map((d) => {
+		const lt = Array.isArray(d.linear_tickets) ? d.linear_tickets[0] : d.linear_tickets;
+		return {
+			id: d.id,
+			session_id: d.session_id,
+			title: d.title,
+			description: d.description,
+			assignee_hint: d.assignee_hint,
+			assignee_user_id: d.assignee_user_id,
+			state: d.state,
+			created_at: d.created_at,
+			linear_identifier: lt?.linear_identifier ?? null,
+			linear_url: lt?.url ?? null
+		};
+	});
+	return json({ drafts });
 };

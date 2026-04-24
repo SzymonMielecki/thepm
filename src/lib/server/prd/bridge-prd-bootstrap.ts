@@ -206,14 +206,7 @@ async function runPrdAutoBootstrap(
 			return;
 		}
 		const db = getOrCreateDatabase();
-		writePrdWithRevision(
-			db,
-			null,
-			summary,
-			w.before,
-			w.after,
-			{ skipFileWrite: true }
-		);
+		await writePrdWithRevision(db, null, summary, w.before, w.after, { skipFileWrite: true });
 		publish({ type: 'agent_trace', phase: 'prd_bootstrap', detail: 'wrote PRD from repo context', sessionId: traceSession });
 	} catch (e) {
 		publish({

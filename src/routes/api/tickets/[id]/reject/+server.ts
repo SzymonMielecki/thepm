@@ -4,7 +4,7 @@ import { assertHubToken } from '$lib/server/auth';
 import { error } from '@sveltejs/kit';
 import { publish } from '$lib/server/bus';
 
-export const POST = (event: RequestEvent) => {
+export const POST = async (event: RequestEvent) => {
 	try {
 		assertHubToken(event);
 	} catch {
@@ -13,11 +13,15 @@ export const POST = (event: RequestEvent) => {
 	const id = event.params.id;
 	if (!id) return error(400, 'id');
 	const db = getOrCreateDatabase();
-	const row = db
-		.prepare('SELECT title, state FROM ticket_drafts WHERE id = ?')
-		.get(id) as { title: string; state: string } | undefined;
+	const { data: row, error: qErr } = await db
+		.from('ticket_drafts')
+		.select('title, state')
+		.eq('id', id)
+		.maybeSingle();
+	if (qErr) return error(500, qErr.message);
 	if (!row) return error(404, 'not found');
-	db.prepare('UPDATE ticket_drafts SET state = ? WHERE id = ?').run('rejected', id);
+	const { error: upErr } = await db.from('ticket_drafts').update({ state: 'rejected' }).eq('id', id);
+	if (upErr) return error(500, upErr.message);
 	publish({ type: 'draft', id, title: row.title, state: 'rejected' });
 	return json({ ok: true });
 };

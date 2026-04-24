@@ -19,7 +19,7 @@ const PATH = '/api/audio/stream';
 /**
  * One browser WebSocket: optional upstream to ElevenLabs, or JSON `{type:'final', text}` from client.
  */
-export function handleBrowserSocket(ws: WebSocket, req: IncomingMessage) {
+export async function handleBrowserSocket(ws: WebSocket, req: IncomingMessage) {
 	const token = hubTokenFromBrowserUpgrade(req);
 	if (!isHubTokenValid(token)) {
 		ws.close(4001, 'Bridge access code required');
@@ -28,8 +28,8 @@ export function handleBrowserSocket(ws: WebSocket, req: IncomingMessage) {
 	const db = getOrCreateDatabase();
 	let urlSession = new URL(req.url ?? '', 'http://x').searchParams.get('session') ?? '';
 	let session = urlSession
-		? getOrCreateSessionId(db, urlSession)
-		: getOrCreateSessionId(db, null);
+		? await getOrCreateSessionId(db, urlSession)
+		: await getOrCreateSessionId(db, null);
 
 	ws.send(JSON.stringify({ type: 'session', sessionId: session }));
 
@@ -51,7 +51,7 @@ export function handleBrowserSocket(ws: WebSocket, req: IncomingMessage) {
 						const sid = e.sessionId && e.sessionId !== 'default' ? e.sessionId : session;
 						const speakerId = e.speakerId ?? `capture:${clientId}`;
 						await handleElevenFinalLine({
-							sessionId: getOrCreateSessionId(db, sid),
+							sessionId: await getOrCreateSessionId(db, sid),
 							text: e.text,
 							speakerId
 						});
@@ -115,7 +115,7 @@ export function handleBrowserSocket(ws: WebSocket, req: IncomingMessage) {
 				}
 				try {
 					await handleElevenFinalLine({
-						sessionId: getOrCreateSessionId(db, j.sessionId ?? session),
+						sessionId: await getOrCreateSessionId(db, j.sessionId ?? session),
 						text: j.text,
 						speakerId: `capture:${clientId}`
 					});
@@ -125,7 +125,7 @@ export function handleBrowserSocket(ws: WebSocket, req: IncomingMessage) {
 					ws.send(JSON.stringify({ type: 'final_failed', error: msg }));
 				}
 			} else if (j.type === 'config' && j.sessionId) {
-				const ns = getOrCreateSessionId(db, j.sessionId);
+				const ns = await getOrCreateSessionId(db, j.sessionId);
 				session = ns;
 				updateCaptureClientSession(clientId, session);
 				ws.send(JSON.stringify({ type: 'config_acked' }));
@@ -180,7 +180,13 @@ export function attachAudioWssToHttpServer(httpServer: Server) {
 	attached = true;
 	const wss = new WebSocketServer({ noServer: true });
 	wss.on('connection', (ws, req) => {
-		void handleBrowserSocket(ws, req as IncomingMessage);
+		void handleBrowserSocket(ws, req as IncomingMessage).catch(() => {
+			try {
+				ws.close(1011, 'internal error');
+			} catch {
+				// ignore
+			}
+		});
 	});
 	httpServer.on('upgrade', (req, socket, head) => {
 		const p = new URL(req.url ?? '', 'http://x').pathname;

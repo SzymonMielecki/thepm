@@ -168,7 +168,7 @@ export async function readPrdForHub(): Promise<string> {
 	return text;
 }
 
-export function writePrdWithRevision(
+export async function writePrdWithRevision(
 	db: AppDatabase,
 	sessionId: string | null,
 	summary: string,
@@ -180,11 +180,13 @@ export function writePrdWithRevision(
 	if (!opts?.skipFileWrite) {
 		writeFileSync(p, after, 'utf-8');
 	}
-	db
-		.prepare(
-			'INSERT INTO prd_revisions (session_id, summary, content_before, content_after) VALUES (?,?,?,?)'
-		)
-		.run(sessionId, summary, before, after);
+	const { error } = await db.from('prd_revisions').insert({
+		session_id: sessionId,
+		summary,
+		content_before: before,
+		content_after: after
+	});
+	if (error) throw error;
 	publish({ type: 'prd', path: p, content: after });
 	invalidatePrdReadCache();
 }
@@ -214,7 +216,7 @@ export async function applyPrdPatch(
 	}
 	const { before, after } = r;
 	const short = revisionSummary(before, after);
-	writePrdWithRevision(db, sessionId, short, before, after, { skipFileWrite: true });
+	await writePrdWithRevision(db, sessionId, short, before, after, { skipFileWrite: true });
 	return { ok: true as const, content: r.content };
 }
 
@@ -230,7 +232,7 @@ export async function writeFullPrd(
 		return { ok: true as const, content: w.after };
 	}
 	const short = 'full edit';
-	writePrdWithRevision(db, sessionId, short, w.before, w.after, { skipFileWrite: true });
+	await writePrdWithRevision(db, sessionId, short, w.before, w.after, { skipFileWrite: true });
 	return { ok: true as const, content: w.after };
 }
 

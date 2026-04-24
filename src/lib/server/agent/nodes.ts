@@ -155,7 +155,7 @@ export async function runDraft(
 	if (!allowDraft) return null;
 	publish({ type: 'agent_trace', phase: 'draft', detail: 'Composing ticket', sessionId });
 	const model = getChatModel();
-	const speakerProfile = getSessionSpeakerProfile(getOrCreateDatabase(), sessionId, speakerId);
+	const speakerProfile = await getSessionSpeakerProfile(getOrCreateDatabase(), sessionId, speakerId);
 	let prdExcerpt = '';
 	try {
 		const p = await readPrdForHub();
@@ -205,25 +205,25 @@ export async function runDraft(
 
 type PendingPrdPatch = { section: string; newBody: string };
 
-export function persistDraft(
+export async function persistDraft(
 	db: AppDatabase,
 	sessionId: string,
 	d: DraftTicket,
 	opts?: { pendingPrdPatch?: PendingPrdPatch | null }
 ) {
 	const id = randomUUID();
-	db.prepare(
-		"INSERT INTO ticket_drafts (id, session_id, title, description, assignee_hint, assignee_user_id, state, prd_section, prd_body) VALUES (?,?,?,?,?,?,'pending',?,?)"
-	).run(
+	const { error } = await db.from('ticket_drafts').insert({
 		id,
-		sessionId,
-		d.title,
-		d.description,
-		d.assigneeHint ?? null,
-		d.assigneeUserId ?? null,
-		opts?.pendingPrdPatch?.section ?? null,
-		opts?.pendingPrdPatch?.newBody ?? null
-	);
+		session_id: sessionId,
+		title: d.title,
+		description: d.description,
+		assignee_hint: d.assigneeHint ?? null,
+		assignee_user_id: d.assigneeUserId ?? null,
+		state: 'pending',
+		prd_section: opts?.pendingPrdPatch?.section ?? null,
+		prd_body: opts?.pendingPrdPatch?.newBody ?? null
+	});
+	if (error) throw error;
 	publish({ type: 'draft', id, title: d.title, state: 'pending' });
 	return id;
 }
@@ -236,8 +236,7 @@ export async function runPrdPatchFromContext(
 	utterance: string,
 	intent: IntentOutput,
 	rg: { path: string; line: number; text: string; excerpt?: string }[],
-	sessionId: string,
-	_db: AppDatabase
+	sessionId: string
 ) {
 	if (intent.category !== 'prd_update') return null;
 	publish({ type: 'agent_trace', phase: 'prd_refine', detail: 'Composing PRD patch from repo context', sessionId });

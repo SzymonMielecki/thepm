@@ -46,12 +46,13 @@ export async function handleElevenFinalLine(params: {
 	const db = getOrCreateDatabase();
 	const { sessionId, text, speakerId } = params;
 	if (!text.trim()) return;
-	const sid = getOrCreateSessionId(db, sessionId);
-	db.prepare('INSERT INTO transcripts (session_id, speaker_id, text) VALUES (?,?,?)').run(
-		sid,
-		speakerId,
-		text.trim()
-	);
+	const sid = await getOrCreateSessionId(db, sessionId);
+	const { error: insErr } = await db.from('transcripts').insert({
+		session_id: sid,
+		speaker_id: speakerId,
+		text: text.trim()
+	});
+	if (insErr) throw insErr;
 	publish({
 		type: 'transcript',
 		sessionId: sid,

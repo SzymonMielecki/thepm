@@ -75,9 +75,7 @@ export function getEnv() {
 		linearApiKey: process.env.LINEAR_API_KEY?.trim(),
 		linearTeamId: process.env.LINEAR_TEAM_ID?.trim(),
 		/** Non-realtime default; Realtime WebSocket forces `scribe_v2_realtime` in `realtimeSttQuery()`. */
-		elevenlabsSttModel: (process.env.ELEVENLABS_STT_MODEL || 'scribe_v2_realtime').trim(),
-		/** Set by `thepm` / `thepm-bridge` wrappers; falls back to cwd. */
-		databasePath: process.env.DATABASE_PATH || join(base, 'data', 'app.db')
+		elevenlabsSttModel: (process.env.ELEVENLABS_STT_MODEL || 'scribe_v2_realtime').trim()
 	};
 }
 

@@ -8,28 +8,18 @@ export type SessionSpeakerProfile = {
 	linearName: string | null;
 };
 
-export function getSessionSpeakerProfile(
+export async function getSessionSpeakerProfile(
 	db: AppDatabase,
 	sessionId: string,
 	speakerId: string | null
-): SessionSpeakerProfile | null {
+): Promise<SessionSpeakerProfile | null> {
 	if (!speakerId) return null;
-	const row = db
-		.prepare(
-			`SELECT session_id, speaker_id, display_name, linear_user_id, linear_name
-			 FROM session_speakers
-			 WHERE session_id = ? AND speaker_id = ?
-			 LIMIT 1`
-		)
-		.get(sessionId, speakerId) as
-		| {
-				session_id: string;
-				speaker_id: string;
-				display_name: string | null;
-				linear_user_id: string | null;
-				linear_name: string | null;
-		  }
-		| undefined;
+	const { data: row } = await db
+		.from('session_speakers')
+		.select('session_id, speaker_id, display_name, linear_user_id, linear_name')
+		.eq('session_id', sessionId)
+		.eq('speaker_id', speakerId)
+		.maybeSingle();
 	if (!row) return null;
 	return {
 		sessionId: row.session_id,

@@ -17,21 +17,8 @@ export const POST = async (event: RequestEvent) => {
 	const id = event.params.id;
 	if (!id) return error(400, 'id');
 	const db = getOrCreateDatabase();
-	const row = db
-		.prepare('SELECT * FROM ticket_drafts WHERE id = ?')
-		.get(id) as
-		| {
-				id: string;
-				session_id: string;
-				title: string;
-				description: string;
-				assignee_hint: string | null;
-				assignee_user_id: string | null;
-				prd_section: string | null;
-				prd_body: string | null;
-				state: string;
-		  }
-		| undefined;
+	const { data: row, error: qErr } = await db.from('ticket_drafts').select('*').eq('id', id).maybeSingle();
+	if (qErr) return error(500, qErr.message);
 	if (!row) return error(404, 'draft not found');
 	if (row.state !== 'pending') {
 		return json({ ok: true, already: true });
@@ -42,10 +29,18 @@ export const POST = async (event: RequestEvent) => {
 		description: row.description,
 		assigneeUserId: assignee
 	});
-	db.prepare('UPDATE ticket_drafts SET state = ? WHERE id = ?').run('approved', id);
-	db
-		.prepare('INSERT OR REPLACE INTO linear_tickets (id, draft_id, linear_identifier, url) VALUES (?,?,?,?)')
-		.run(created.id, id, created.identifier ?? '', created.url ?? '');
+	const { error: upDraftErr } = await db.from('ticket_drafts').update({ state: 'approved' }).eq('id', id);
+	if (upDraftErr) return error(500, upDraftErr.message);
+	const { error: upLinErr } = await db.from('linear_tickets').upsert(
+		{
+			id: created.id,
+			draft_id: id,
+			linear_identifier: created.identifier ?? '',
+			url: created.url ?? ''
+		},
+		{ onConflict: 'id' }
+	);
+	if (upLinErr) return error(500, upLinErr.message);
 	publish({ type: 'draft', id, title: row.title, state: 'approved' });
 	let prdApplied = false;
 	let prdError: string | null = null;

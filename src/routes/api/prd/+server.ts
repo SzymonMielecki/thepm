@@ -53,12 +53,12 @@ export const POST = async (event: RequestEvent) => {
 	};
 	const db = getOrCreateDatabase();
 	if (typeof b.fullContent === 'string') {
-		const sid = getOrCreateSessionId(db, b.sessionId);
+		const sid = await getOrCreateSessionId(db, b.sessionId);
 		const r = await writeFullPrd(db, sid, b.fullContent);
 		return json({ content: r.content });
 	}
 	if (!b.section || b.body == null) return error(400, 'section and body');
-	const sid = getOrCreateSessionId(db, b.sessionId);
+	const sid = await getOrCreateSessionId(db, b.sessionId);
 	const r = await applyPrdPatch(db, sid, b.section, b.body);
 	if (!r || !('ok' in r) || !r.ok) {
 		return error(400, 'patch failed');

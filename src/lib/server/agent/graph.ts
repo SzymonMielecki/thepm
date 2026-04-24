@@ -144,14 +144,14 @@ async function nodeDraft(s: S): Promise<Partial<S>> {
 	const rg = s.rg ?? [];
 	const d = await runDraft(s.utterance, s.intent, rg, s.sessionId, s.speakerId);
 	if (!d) return {};
-	const id = persistDraft(db(), s.sessionId, d, { pendingPrdPatch: s.pendingPrdPatch });
+	const id = await persistDraft(db(), s.sessionId, d, { pendingPrdPatch: s.pendingPrdPatch });
 	return { draftId: id };
 }
 
 async function nodePrd(s: S): Promise<Partial<S>> {
 	if (!s.intent) return {};
 	const rg = s.rg ?? [];
-	const pendingPrdPatch = await runPrdPatchFromContext(s.utterance, s.intent, rg, s.sessionId, db());
+	const pendingPrdPatch = await runPrdPatchFromContext(s.utterance, s.intent, rg, s.sessionId);
 	return { pendingPrdPatch };
 }
 

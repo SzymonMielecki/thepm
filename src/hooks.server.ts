@@ -18,7 +18,7 @@ function boot() {
 }
 
 export const handle = async ({ event, resolve }) => {
-	// Browsers request /favicon.ico by default; do not require SQLite for that.
+	// Browsers request /favicon.ico by default; do not require the DB client for that.
 	if (event.url.pathname === '/favicon.ico') {
 		return resolve(event);
 	}

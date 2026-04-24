@@ -17,12 +17,13 @@ export const POST = async (event: RequestEvent) => {
 	} catch {
 		// empty body
 	}
-	const id = j?.id ? getOrCreateSessionId(db, j.id) : getOrCreateSessionId(db, null);
+	const id = j?.id ? await getOrCreateSessionId(db, j.id) : await getOrCreateSessionId(db, null);
 	if (j?.name) {
-		db.prepare('UPDATE sessions SET name = ?, updated_at = datetime("now") WHERE id = ?').run(
-			j.name,
-			id
-		);
+		const { error: upErr } = await db
+			.from('sessions')
+			.update({ name: j.name, updated_at: new Date().toISOString() })
+			.eq('id', id);
+		if (upErr) return error(500, upErr.message);
 	}
 	return json({ id });
 };

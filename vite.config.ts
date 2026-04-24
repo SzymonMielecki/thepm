@@ -63,10 +63,10 @@ export default defineConfig({
     environment: "node",
   },
   optimizeDeps: {
-    exclude: ["better-sqlite3", "@sveltejs/kit"],
+    exclude: ["@sveltejs/kit"],
   },
   ssr: {
-    external: ["better-sqlite3", "ws", "chokidar"],
+    external: ["ws", "chokidar"],
     noExternal: [],
   },
 });

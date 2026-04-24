@@ -6,6 +6,8 @@ thePM always listens. You just leave your phone with microphone on, and issues a
 Usage:
 
 - Start the server with `pnpm run dev`/ Connect to the deployed server
+- run `pnpm install` to install the dependencies
+- run `pnpm build:bridge` to build the bridge binary
 - run `pnpm link --global` to make thePM available globally
 - run `thepm bridge --hub-url {THEPM_URL} --project-root . --prd PRD.md --linear-api-key {YOUR_LINEAR_API_KEY} --lin-team-id {YOUR_LINEAR_TEAM_ID}` within the repo you are working on
 - open the link given by the above command in your browser, and open the mobile capture while copying the token.
