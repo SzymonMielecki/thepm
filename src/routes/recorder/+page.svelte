@@ -79,7 +79,7 @@
 
   async function loadTranscripts() {
     if (!hasUiAuth) {
-      feedError = "Open from a bridge session URL or provide the active bridge token";
+      feedError = "Open from a bridge token URL or provide the active bridge token";
       return;
     }
     feedError = "";
@@ -432,9 +432,7 @@
     PWA: allow microphone. Use <code>tailscale funnel</code> for HTTPS on phones.
   </p>
   <p class="text-xs text-zinc-500">
-    Bridge: {data.bridgeReady ? "connected" : "waiting"} · UI session: {data.bridgeSessionActive
-      ? "active"
-      : "inactive"}
+    Bridge: {data.bridgeReady ? "connected" : "waiting"}
   </p>
 
   <div class="space-y-2">
@@ -442,7 +440,7 @@
       <span>Bridge token</span>
       {#if !token.trim()}
         <p class="mt-1 text-zinc-500">
-          Open this page from the bridge session URL printed by <code
+          Open this page using the <code>?token=</code> URL printed by <code
             >thepm bridge</code
           >, or paste the active bridge token.
         </p>

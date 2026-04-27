@@ -5,6 +5,13 @@ import { createRequire } from 'node:module';
 import type Database from 'better-sqlite3';
 import { projectBaseDir } from './config';
 
+const MIGRATION_IDS_AFTER_INIT = [
+	'002_agents',
+	'003_catalog',
+	'004_ticket_drafts_project_root',
+	'005_delegations_linear'
+] as const;
+
 function loadInitMigrationSql(): string {
 	if (typeof __THEPM_INIT_SQL__ === 'string' && __THEPM_INIT_SQL__.length > 0) {
 		return __THEPM_INIT_SQL__;
@@ -37,6 +44,28 @@ function isDbEmpty(db: Database.Database): boolean {
 function runInitialMigrationIfNeeded(db: Database.Database) {
 	if (!isDbEmpty(db)) return;
 	db.exec(loadInitMigrationSql());
+}
+
+function applyPendingMigrations(db: Database.Database) {
+	try {
+		const row = db
+			.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='_migrations'")
+			.get() as { name: string } | undefined;
+		if (!row) return;
+		for (const id of MIGRATION_IDS_AFTER_INIT) {
+			const applied = db.prepare('SELECT id FROM _migrations WHERE id = ?').get(id) as
+				| { id: string }
+				| undefined;
+			if (applied) continue;
+			const sql = readFileSync(
+				fileURLToPath(new URL(`./migrations/${id}.sql`, import.meta.url)),
+				'utf-8'
+			);
+			db.exec(sql);
+		}
+	} catch {
+		/* ignore odd states */
+	}
 }
 
 function ensureTicketDraftsSpeakerIdColumn(db: Database.Database) {
@@ -282,6 +311,23 @@ class LocalFromBuilder {
 			return Promise.resolve({ data: null, error: { message: (e as Error).message } });
 		}
 	}
+
+	delete(): {
+		eq: (col: string, val: unknown) => Promise<LocalFromResult<null>>;
+	} {
+		const t = this.table;
+		const db = this.db;
+		return {
+			eq: async (col: string, val: unknown) => {
+				try {
+					db.prepare(`DELETE FROM "${t}" WHERE "${col}" = ?`).run(val);
+					return { data: null, error: null };
+				} catch (e) {
+					return { data: null, error: { message: (e as Error).message } };
+				}
+			}
+		};
+	}
 }
 
 export type LocalHubDatabase = { from: (t: string) => LocalFromBuilder; __isLocal: true };
@@ -298,6 +344,7 @@ export function openLocalHubDatabase(): LocalHubDatabase {
 		runInitialMigrationIfNeeded(db);
 	}
 	ensureTicketDraftsSpeakerIdColumn(db);
+	applyPendingMigrations(db);
 	return {
 		__isLocal: true,
 		from: (t: string) => new LocalFromBuilder(db, t)

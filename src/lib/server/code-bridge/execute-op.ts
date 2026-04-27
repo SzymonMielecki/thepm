@@ -1,9 +1,31 @@
-import { writeFileSync, existsSync, mkdirSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { writeFileSync, existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
+import { dirname, join, relative, sep } from 'node:path';
 import { readScopedFile, listScopedDir } from '../fs-scoped';
 import { runRipgrep } from '../ripgrep';
 import { getPrdContent, patchSection } from '../prd/store';
 import type { CodeOpName } from './protocol';
+import { detectMuxCapabilities } from './mux/detect';
+import {
+	handleMuxCancel,
+	handleMuxDispatch,
+	handleMuxFocus,
+	handleMuxNotify,
+	handleMuxRemoveWorktree,
+	handleMuxStatus
+} from './mux-runner';
+
+function readMdFilesInDir(projectRoot: string, relDir: string): { path: string; content: string }[] {
+	const abs = join(projectRoot, relDir);
+	if (!existsSync(abs)) return [];
+	const out: { path: string; content: string }[] = [];
+	for (const ent of readdirSync(abs, { withFileTypes: true })) {
+		if (!ent.isFile() || !ent.name.endsWith('.md')) continue;
+		const fp = join(abs, ent.name);
+		const rel = relative(projectRoot, fp).split(sep).join('/');
+		out.push({ path: rel, content: readFileSync(fp, 'utf-8') });
+	}
+	return out;
+}
 
 export type CodeBridgeContext = {
 	projectRoot: string;
@@ -68,6 +90,37 @@ export async function executeCodeOp(
 			}
 			writeFileSync(ctx.prdPath, content, 'utf-8');
 			return { before, after: content };
+		}
+		case 'mux_capabilities': {
+			return detectMuxCapabilities();
+		}
+		case 'mux_dispatch': {
+			return handleMuxDispatch(ctx, args);
+		}
+		case 'mux_status': {
+			return handleMuxStatus(args);
+		}
+		case 'mux_cancel': {
+			return handleMuxCancel(args);
+		}
+		case 'mux_remove_worktree': {
+			return handleMuxRemoveWorktree(ctx.projectRoot, args);
+		}
+		case 'mux_focus': {
+			return handleMuxFocus(args);
+		}
+		case 'mux_notify': {
+			return handleMuxNotify(args);
+		}
+		case 'get_delegation_repo_files': {
+			const claudeAgents = readMdFilesInDir(ctx.projectRoot, join('.claude', 'agents'));
+			const claudeTeams = readMdFilesInDir(ctx.projectRoot, join('.claude', 'teams'));
+			const teamsJsonPath = join(ctx.projectRoot, '.thepm', 'teams.json');
+			let thepmTeamsJson: string | null = null;
+			if (existsSync(teamsJsonPath)) {
+				thepmTeamsJson = readFileSync(teamsJsonPath, 'utf-8');
+			}
+			return { claudeAgents, claudeTeams, thepmTeamsJson };
 		}
 		default: {
 			const _x: never = op;

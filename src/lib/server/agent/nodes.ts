@@ -14,6 +14,7 @@ import type { AppDatabase } from '../db';
 import { readPrdForHub } from '../prd/store';
 import { getOrCreateDatabase } from '../db';
 import { getSessionSpeakerProfile, resolveDraftAssigneeFromSpeaker } from '../speakers';
+import { getEffectiveTicketProjectRoot } from '../ticket-scope';
 
 const intentPrompt = `You are a product manager assistant. Classify the latest team utterance.
 The message may include the current root PRD (PRD.md) for context so you can align prd_update sections with existing headings.
@@ -222,7 +223,8 @@ export async function persistDraft(
 		assignee_user_id: d.assigneeUserId ?? null,
 		state: 'pending',
 		prd_section: opts?.pendingPrdPatch?.section ?? null,
-		prd_body: opts?.pendingPrdPatch?.newBody ?? null
+		prd_body: opts?.pendingPrdPatch?.newBody ?? null,
+		project_root: getEffectiveTicketProjectRoot()
 	});
 	if (error) throw error;
 	publish({ type: 'draft', id, title: d.title, state: 'pending' });

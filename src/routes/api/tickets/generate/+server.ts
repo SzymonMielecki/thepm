@@ -4,6 +4,7 @@ import { getOrCreateDatabase, type AppDatabase } from '$lib/server/db';
 import { getOrCreateSessionId } from '$lib/server/session';
 import { runPmGraph } from '$lib/server/agent/graph';
 import { getEnv } from '$lib/server/config';
+import { getEffectiveTicketProjectRoot } from '$lib/server/ticket-scope';
 
 async function resolveHubSessionId(db: AppDatabase): Promise<string> {
 	const { data: fromTx } = await db
@@ -13,9 +14,11 @@ async function resolveHubSessionId(db: AppDatabase): Promise<string> {
 		.limit(1)
 		.maybeSingle<{ session_id: string }>();
 	if (fromTx) return fromTx.session_id;
+	const root = getEffectiveTicketProjectRoot();
 	const { data: fromDraft } = await db
 		.from('ticket_drafts')
 		.select('session_id')
+		.eq('project_root', root)
 		.order('created_at', { ascending: false })
 		.limit(1)
 		.maybeSingle<{ session_id: string }>();

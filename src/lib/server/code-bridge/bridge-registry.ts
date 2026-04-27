@@ -1,10 +1,9 @@
-import { randomBytes, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { WebSocket, type RawData } from 'ws';
 import type { WebSocket as WsType } from 'ws';
 import type { CodeOpName, CodeReqMessage, CodeResMessage } from './protocol';
 
 const DEFAULT_CALL_MS = 60_000;
-const BRIDGE_UI_SESSION_TTL_MS = 8 * 60 * 60 * 1000;
 
 type Pending = {
 	complete: (v: CodeResMessage) => void;
@@ -24,14 +23,10 @@ type BridgeEntry = {
 	linearTeamId?: string;
 };
 
-type BridgeUiSession = { workspaceId: string; token: string; expiresAt: number };
-
 /** `server.ts` (tsx) and the bundled SvelteKit server are separate module instances — share in-memory state on globalThis. */
 type BridgeGlobalMaps = {
 	bridges: Map<string, BridgeEntry>;
 	pending: Map<string, Pending>;
-	bridgeUiSessionsByWorkspace: Map<string, BridgeUiSession>;
-	bridgeUiSessionsByToken: Map<string, BridgeUiSession>;
 };
 
 function getBridgeMaps(): BridgeGlobalMaps {
@@ -39,15 +34,13 @@ function getBridgeMaps(): BridgeGlobalMaps {
 	if (!g.__thepmBridgeRegistryMaps) {
 		g.__thepmBridgeRegistryMaps = {
 			bridges: new Map(),
-			pending: new Map(),
-			bridgeUiSessionsByWorkspace: new Map(),
-			bridgeUiSessionsByToken: new Map()
+			pending: new Map()
 		};
 	}
 	return g.__thepmBridgeRegistryMaps;
 }
 
-const { bridges, pending, bridgeUiSessionsByWorkspace, bridgeUiSessionsByToken } = getBridgeMaps();
+const { bridges, pending } = getBridgeMaps();
 
 function safeSend(ws: WsType, obj: object) {
 	if (ws.readyState !== WebSocket.OPEN) {
@@ -72,7 +65,7 @@ export function registerBridgeConnection(
 		linearApiKey?: string;
 		linearTeamId?: string;
 	}
-): BridgeUiSession {
+): void {
 	const old = bridges.get(workspaceId);
 	if (old && old.ws !== ws) {
 		try {
@@ -90,7 +83,6 @@ export function registerBridgeConnection(
 		linearApiKey: opts?.linearApiKey?.trim() || undefined,
 		linearTeamId: opts?.linearTeamId?.trim() || undefined
 	});
-	return issueBridgeUiSession(workspaceId);
 }
 
 /** Active bridge client paths (from last `bridge_hello`) for a workspace, if connected. */
@@ -121,59 +113,12 @@ export function unregisterBridgeConnection(workspaceId: string, ws: WsType) {
 	if (cur?.ws === ws) {
 		bridges.delete(workspaceId);
 	}
-	clearBridgeUiSession(workspaceId);
 	for (const [id, p] of [...pending]) {
 		if (p.workspaceId !== workspaceId) continue;
 		p.complete({ type: 'code_res', id, ok: false, error: 'Bridge connection closed' });
 		clearTimeout(p.timer);
 		pending.delete(id);
 	}
-}
-
-function clearBridgeUiSession(workspaceId: string) {
-	const cur = bridgeUiSessionsByWorkspace.get(workspaceId);
-	if (!cur) return;
-	bridgeUiSessionsByWorkspace.delete(workspaceId);
-	bridgeUiSessionsByToken.delete(cur.token);
-}
-
-function sessionActive(s: BridgeUiSession): boolean {
-	if (Date.now() >= s.expiresAt) {
-		clearBridgeUiSession(s.workspaceId);
-		return false;
-	}
-	const bridge = bridges.get(s.workspaceId);
-	return !!bridge && bridge.ws.readyState === WebSocket.OPEN;
-}
-
-export function issueBridgeUiSession(workspaceId: string): BridgeUiSession {
-	clearBridgeUiSession(workspaceId);
-	const s: BridgeUiSession = {
-		workspaceId,
-		token: randomBytes(24).toString('base64url'),
-		expiresAt: Date.now() + BRIDGE_UI_SESSION_TTL_MS
-	};
-	bridgeUiSessionsByWorkspace.set(workspaceId, s);
-	bridgeUiSessionsByToken.set(s.token, s);
-	return s;
-}
-
-export function isBridgeUiSessionTokenValid(token: string | null | undefined): boolean {
-	const t = (token ?? '').trim();
-	if (!t) return false;
-	const s = bridgeUiSessionsByToken.get(t);
-	if (!s) return false;
-	if (!sessionActive(s)) return false;
-	return true;
-}
-
-export function bridgeUiSessionForWorkspace(
-	workspaceId: string
-): { token: string; expiresAt: number } | null {
-	const s = bridgeUiSessionsByWorkspace.get(workspaceId);
-	if (!s) return null;
-	if (!sessionActive(s)) return null;
-	return { token: s.token, expiresAt: s.expiresAt };
 }
 
 function parseJson(data: RawData): unknown {
@@ -267,6 +212,4 @@ export function _resetBridgeRegistryForTests() {
 	}
 	pending.clear();
 	bridges.clear();
-	bridgeUiSessionsByToken.clear();
-	bridgeUiSessionsByWorkspace.clear();
 }

@@ -1,10 +1,6 @@
 import { Buffer } from 'node:buffer';
 import { error, type RequestEvent } from '@sveltejs/kit';
-import {
-	isBridgeUiSessionTokenValid,
-	getBridgeCount,
-	isBridgeAccessTokenValid
-} from './code-bridge/bridge-registry';
+import { getBridgeCount, isBridgeAccessTokenValid } from './code-bridge/bridge-registry';
 
 function tokenFromEvent(event: RequestEvent) {
 	const header = event.request.headers.get('authorization');
@@ -28,24 +24,9 @@ function tokenFromEvent(event: RequestEvent) {
 	return '';
 }
 
-function bridgeSessionFromEvent(event: RequestEvent): string {
-	const cookie = event.cookies.get('thepm_bridge_session')?.trim();
-	if (cookie) return cookie;
-	const header = event.request.headers.get('x-bridge-session')?.trim();
-	if (header) return header;
-	const q = event.url.searchParams.get('bridge_session')?.trim();
-	if (q) return q;
-	return '';
-}
-
 export function assertHubToken(event: RequestEvent) {
-	const bridgeSession = bridgeSessionFromEvent(event);
 	const t = tokenFromEvent(event);
-	const sessionValid = bridgeSession ? isBridgeUiSessionTokenValid(bridgeSession) : false;
 	const tokenValid = t ? isBridgeAccessTokenValid(t) : false;
-	if (sessionValid) {
-		return;
-	}
 	if (tokenValid) {
 		return;
 	}

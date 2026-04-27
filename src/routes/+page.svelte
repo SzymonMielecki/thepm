@@ -5,6 +5,7 @@
   import PrdEditor from "$lib/components/PrdEditor.svelte";
   import AgentTrace from "$lib/components/AgentTrace.svelte";
   import ConnectedCapture from "$lib/components/ConnectedCapture.svelte";
+  import HubBrandNav from "$lib/components/HubBrandNav.svelte";
   import ToastStack from "$lib/components/ToastStack.svelte";
   import ExpandableBlockHeader from "$lib/components/ExpandableBlockHeader.svelte";
   import type { CaptureClientInfo } from "$lib/capture-types";
@@ -88,6 +89,8 @@
     | "speakers"
     | null;
   let expandedHubPanel = $state<HubExpandedPanel>(null);
+  let muxCap = $state({ flavor: "none", session: undefined as string | undefined });
+  let delegationsReloadKey = $state(0);
   let toasts = $state(
     [] as { id: number; kind: "success" | "error" | "info"; message: string }[],
   );
@@ -241,6 +244,16 @@
     linearUsers = j.users ?? [];
   }
 
+  async function loadAgentsMux() {
+    if (!token.trim()) return;
+    const r = await fetch("/api/agents", { headers: authHeader() });
+    if (!r.ok) return;
+    const j = (await r.json()) as {
+      mux?: { flavor: string; session?: string };
+    };
+    if (j.mux) muxCap = { flavor: j.mux.flavor, session: j.mux.session };
+  }
+
   async function saveSpeakerMapping(payload: {
     sessionId: string;
     speakerId: string;
@@ -337,6 +350,19 @@
           proposed = `${pe.section}:\n${pe.body}`;
         } else if (e.type === "draft") {
           void loadDrafts();
+        } else if (e.type === "delegation" || e.type === "delegation_status") {
+          delegationsReloadKey += 1;
+          const term =
+            e.type === "delegation" &&
+            ((e as { status?: string }).status === "succeeded" ||
+              (e as { status?: string }).status === "failed");
+          if (term) {
+            pushToast(
+              "info",
+              `Delegation ${(e as { status?: string }).status ?? "updated"}`,
+              4000,
+            );
+          }
         } else if (e.type === "capture_devices") {
           const p = e as unknown as { devices: CaptureClientInfo[] };
           if (Array.isArray(p.devices)) {
@@ -390,6 +416,7 @@
       "success",
       token ? "Bridge token saved." : "Bridge token cleared.",
     );
+    void loadAgentsMux();
   }
 
   async function refreshPrd() {
@@ -487,6 +514,7 @@
       await loadCaptureClients();
       await loadSpeakerMappings();
       await loadLinearUsers();
+      await loadAgentsMux();
     })();
     hydrated = true;
   });
@@ -516,8 +544,8 @@
       <strong>Code bridge</strong> is not connected. The hub cannot read the
       repo or PRD from your machine. Run
       <code>thepm bridge --help</code> with the same <code>--hub-url</code>,
-      then paste the active bridge token (or open the printed
-      <code>bridge_session</code> URL), then refresh this page to reconnect.
+      then paste the active bridge token (or open the printed dashboard URL with
+      <code>?token=</code>), then refresh this page to reconnect.
     </div>
   {/if}
   {#if prdLoadError}
@@ -534,9 +562,7 @@
 <div class="flex min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden">
   <header class="shrink-0 border-b border-zinc-800 px-4 py-3">
     <div class="flex flex-wrap items-center justify-between gap-3">
-      <div>
-        <h1 class="text-lg font-semibold tracking-tight">thepm</h1>
-      </div>
+      <HubBrandNav />
       <div class="flex flex-wrap items-center gap-2 text-xs">
         <div class="flex flex-wrap items-center gap-1 text-zinc-500">
           <span>Bridge token</span>
@@ -558,7 +584,7 @@
       <div
         class="mt-2 rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-amber-200"
       >
-        Open the dashboard using the <code>bridge_session</code> URL printed by
+        Open the dashboard using the URL with <code>?token=</code> printed by
         <code>thepm bridge</code>, or paste the active bridge token above.
       </div>
     {/if}
@@ -668,6 +694,8 @@
             token={token ?? ""}
             onupdate={loadDrafts}
             frameless={expandedHubPanel === "drafts"}
+            delegateMuxOk={muxCap.flavor !== "none"}
+            {bridgeConnected}
             ontoast={(kind: "success" | "error" | "info", message: string) =>
               pushToast(kind, message)}
           />

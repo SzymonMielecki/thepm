@@ -3,12 +3,10 @@ import type { PageServerLoad } from './$types';
 
 type RecorderPageData = {
 	bridgeReady: boolean;
-	bridgeSessionActive: boolean;
 };
 
-export const load: PageServerLoad = async ({ locals }): Promise<RecorderPageData> => {
+export const load: PageServerLoad = async (): Promise<RecorderPageData> => {
 	return {
-		bridgeReady: isBridgeReady(),
-		bridgeSessionActive: !!locals.bridgeSessionActive
+		bridgeReady: isBridgeReady()
 	};
 };

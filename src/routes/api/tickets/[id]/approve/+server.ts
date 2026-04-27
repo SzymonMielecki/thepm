@@ -5,6 +5,9 @@ import { error } from '@sveltejs/kit';
 import { findUserIdByNameHint, createIssueFromDraft, isLinearApiConfigured } from '$lib/server/linear';
 import { publish } from '$lib/server/bus';
 import { applyPrdPatch } from '$lib/server/prd/store';
+import { getEnv } from '$lib/server/config';
+import { delegateDraft } from '$lib/server/agents/dispatch';
+import { getEffectiveTicketProjectRoot } from '$lib/server/ticket-scope';
 
 type ApproveDraftRow = {
 	state: string;
@@ -29,10 +32,12 @@ export const POST = async (event: RequestEvent) => {
 	const id = event.params.id;
 	if (!id) return error(400, 'id');
 	const db = getOrCreateDatabase();
+	const root = getEffectiveTicketProjectRoot();
 	const { data: row, error: qErr } = await db
 		.from('ticket_drafts')
 		.select('*')
 		.eq('id', id)
+		.eq('project_root', root)
 		.maybeSingle<ApproveDraftRow>();
 	if (qErr) return error(500, qErr.message);
 	if (!row) return error(404, 'draft not found');
@@ -74,5 +79,24 @@ export const POST = async (event: RequestEvent) => {
 			});
 		}
 	}
-	return json({ ok: true, linear: created, prdApplied, prdError });
+
+	const rawBody = await event.request.json().catch(() => ({}));
+	const delegate = rawBody?.delegate as { kind?: string; name?: string } | undefined;
+	let delegationId: string | undefined;
+	let delegationError: string | undefined;
+	if (delegate?.kind === 'team' && delegate.name?.trim()) {
+		try {
+			const out = await delegateDraft({
+				db,
+				draftId: id,
+				target: { kind: 'team', name: delegate.name.trim() },
+				workspaceId: getEnv().codeBridgeWorkspaceId
+			});
+			delegationId = out.delegationId;
+		} catch (e) {
+			delegationError = (e as Error).message;
+		}
+	}
+
+	return json({ ok: true, linear: created, prdApplied, prdError, delegationId, delegationError });
 };

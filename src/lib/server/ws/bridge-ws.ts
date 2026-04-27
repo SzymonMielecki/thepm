@@ -52,7 +52,7 @@ export function handleBridgeSocket(ws: WebSocket, req: IncomingMessage) {
 		st.projectRoot = p.data.PROJECT_ROOT;
 		st.prdPath = p.data.PRD_PATH;
 		st.ready = true;
-		const uiSession = registerBridgeConnection(st.workspaceId, ws, {
+		registerBridgeConnection(st.workspaceId, ws, {
 			clientLabel: st.projectRoot,
 			projectRoot: st.projectRoot,
 			prdPath: st.prdPath,
@@ -63,9 +63,7 @@ export function handleBridgeSocket(ws: WebSocket, req: IncomingMessage) {
 		send(ws, {
 			type: 'bridge_ack',
 			workspaceId: st.workspaceId,
-			ok: true,
-			uiSessionToken: uiSession.token,
-			uiSessionExpiresAt: uiSession.expiresAt
+			ok: true
 		});
 		scheduleBridgePrdBootstrap(st.workspaceId);
 	};

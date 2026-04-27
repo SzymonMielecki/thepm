@@ -6,7 +6,15 @@ export type CodeOpName =
 	| 'ripgrep'
 	| 'prd_read'
 	| 'prd_patch'
-	| 'prd_write_full';
+	| 'prd_write_full'
+	| 'mux_capabilities'
+	| 'mux_dispatch'
+	| 'mux_status'
+	| 'mux_cancel'
+	| 'mux_remove_worktree'
+	| 'mux_focus'
+	| 'mux_notify'
+	| 'get_delegation_repo_files';
 
 export type CodeReqMessage = {
 	type: 'code_req';

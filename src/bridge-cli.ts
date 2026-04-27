@@ -124,18 +124,6 @@ function printConnRefusedHint(dialUrl: string) {
 	);
 }
 
-function uiUrlWithSession(
-	hubUrl: string,
-	routePath: string,
-	sessionToken: string,
-	token?: string
-): string {
-	const u = new URL(routePath, hubUrl);
-	u.searchParams.set('bridge_session', sessionToken);
-	if (token) u.searchParams.set('token', token);
-	return u.toString();
-}
-
 function uiUrlWithToken(hubUrl: string, routePath: string, token: string): string {
 	const u = new URL(routePath, hubUrl);
 	u.searchParams.set('token', token);
@@ -211,34 +199,10 @@ async function main() {
 		const t = (j as { type?: string }).type;
 		if (t === 'bridge_ack') {
 			if ((j as { ok?: boolean }).ok) {
-				const sessionToken = (j as { uiSessionToken?: string }).uiSessionToken;
-				const sessionExpiresAt = (j as { uiSessionExpiresAt?: number }).uiSessionExpiresAt;
 				// eslint-disable-next-line no-console
 				console.log('[thepm-bridge] ready');
-				if (sessionToken) {
-					// eslint-disable-next-line no-console
-					console.log(
-						`[thepm-bridge] Open dashboard: ${uiUrlWithSession(hubUrl, '/', sessionToken, hubToken)}`
-					);
-					// eslint-disable-next-line no-console
-					console.log(
-						`[thepm-bridge] Open recorder:    ${uiUrlWithSession(hubUrl, '/recorder', sessionToken, hubToken)}`
-					);
-					if (typeof sessionExpiresAt === 'number' && Number.isFinite(sessionExpiresAt)) {
-						// eslint-disable-next-line no-console
-						console.log(
-							`[thepm-bridge] Session expires: ${new Date(sessionExpiresAt).toISOString()}`
-						);
-					}
-				}
 				// eslint-disable-next-line no-console
-				console.log(
-					`[thepm-bridge] Open dashboard (token): ${uiUrlWithToken(hubUrl, '/', hubToken)}`
-				);
-				// eslint-disable-next-line no-console
-				console.log(
-					`[thepm-bridge] Open recorder (token):    ${uiUrlWithToken(hubUrl, '/recorder', hubToken)}`
-				);
+				console.log(`[thepm-bridge] Open dashboard: ${uiUrlWithToken(hubUrl, '/', hubToken)}`);
 			} else {
 				// eslint-disable-next-line no-console
 				console.error('[thepm-bridge] refused:', (j as { error?: string }).error);

@@ -3,6 +3,7 @@ import { getOrCreateDatabase } from '$lib/server/db';
 import { assertHubToken } from '$lib/server/auth';
 import { error } from '@sveltejs/kit';
 import { publish } from '$lib/server/bus';
+import { getEffectiveTicketProjectRoot } from '$lib/server/ticket-scope';
 
 export const POST = async (event: RequestEvent) => {
 	try {
@@ -13,10 +14,12 @@ export const POST = async (event: RequestEvent) => {
 	const id = event.params.id;
 	if (!id) return error(400, 'id');
 	const db = getOrCreateDatabase();
+	const root = getEffectiveTicketProjectRoot();
 	const { data: row, error: qErr } = await db
 		.from('ticket_drafts')
 		.select('title, state')
 		.eq('id', id)
+		.eq('project_root', root)
 		.maybeSingle<{ title: string; state: string }>();
 	if (qErr) return error(500, qErr.message);
 	if (!row) return error(404, 'not found');

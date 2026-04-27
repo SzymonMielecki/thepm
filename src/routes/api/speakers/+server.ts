@@ -2,6 +2,7 @@ import { json, error, type RequestEvent } from '@sveltejs/kit';
 import { assertHubToken } from '$lib/server/auth';
 import { getOrCreateDatabase } from '$lib/server/db';
 import type { AppDatabase } from '$lib/server/db';
+import { getEffectiveTicketProjectRoot } from '$lib/server/ticket-scope';
 
 type SpeakerRow = {
 	session_id: string;
@@ -106,12 +107,14 @@ export const PATCH = async (event: RequestEvent) => {
 	const assigneeHint = linearUserId
 		? (linearName?.trim() || displayName || null)
 		: (displayName || null);
+	const ticketRoot = getEffectiveTicketProjectRoot();
 	const { data: pendingIds, error: dErr } = await db
 		.from('ticket_drafts')
 		.select('id')
 		.eq('session_id', sessionId)
 		.eq('speaker_id', speakerId)
-		.eq('state', 'pending');
+		.eq('state', 'pending')
+		.eq('project_root', ticketRoot);
 	if (dErr) return error(500, dErr.message);
 	for (const row of pendingIds ?? []) {
 		const id = (row as { id: string }).id;

@@ -8,7 +8,6 @@ declare global {
 	namespace App {
 		interface Locals {
 			db: AppDatabase;
-			bridgeSessionActive: boolean;
 		}
 	}
 }

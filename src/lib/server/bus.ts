@@ -25,6 +25,29 @@ export type CaptureWaveformEvent = {
 	/** ~0..1, length capped on server; bar graph on hub */
 	levels: number[];
 };
+export type DelegationEvent = {
+	type: 'delegation';
+	id: string;
+	/** Set when delegation was started from a hub ticket draft */
+	draftId?: string | null;
+	/** Set when delegation was started from a Linear issue without a draft */
+	linearIssueId?: string | null;
+	targetKind: 'agent' | 'team';
+	targetName: string;
+	status: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
+};
+export type DelegationStatusEvent = {
+	type: 'delegation_status';
+	delegationId: string;
+	runId: string;
+	agentName: string;
+	windowId?: string;
+	branchName?: string;
+	worktreePath?: string;
+	status: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
+	exitCode?: number;
+	diffStat?: string;
+};
 export type SseEvent =
 	| TranscriptEvent
 	| DraftEvent
@@ -32,7 +55,9 @@ export type SseEvent =
 	| AgentTraceEvent
 	| PrdProposedEvent
 	| CaptureDevicesEvent
-	| CaptureWaveformEvent;
+	| CaptureWaveformEvent
+	| DelegationEvent
+	| DelegationStatusEvent;
 
 const BUS_KEY = Symbol.for('thepm.hubEventBus');
 

@@ -1,6 +1,7 @@
 import { json, type RequestEvent } from '@sveltejs/kit';
 import { getOrCreateDatabase } from '$lib/server/db';
 import { assertHubToken } from '$lib/server/auth';
+import { getEffectiveTicketProjectRoot } from '$lib/server/ticket-scope';
 import { error } from '@sveltejs/kit';
 
 type DraftRow = {
@@ -22,6 +23,7 @@ export const GET = async (event: RequestEvent) => {
 		return error(401, 'unauthorized');
 	}
 	const db = getOrCreateDatabase();
+	const root = getEffectiveTicketProjectRoot();
 	const { data: raw, error: qErr } = await db
 		.from('ticket_drafts')
 		.select(
@@ -37,6 +39,7 @@ export const GET = async (event: RequestEvent) => {
 			linear_tickets ( linear_identifier, url )
 		`
 		)
+		.eq('project_root', root)
 		.order('created_at', { ascending: false });
 	if (qErr) return error(500, qErr.message);
 	const rows = (raw ?? []) as DraftRow[];
