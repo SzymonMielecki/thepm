@@ -17,6 +17,8 @@ type BridgeEntry = {
 	lastLabel?: string;
 	prdPath?: string;
 	projectRoot?: string;
+	/** Extra clones for search/read; mirrored in delegation worktrees. */
+	contextRoots?: string[];
 	accessToken?: string;
 	/** Optional; from bridge CLI — override hub env for this workspace. */
 	linearApiKey?: string;
@@ -61,6 +63,7 @@ export function registerBridgeConnection(
 		clientLabel?: string;
 		prdPath?: string;
 		projectRoot?: string;
+		contextRoots?: string[];
 		accessToken?: string;
 		linearApiKey?: string;
 		linearTeamId?: string;
@@ -79,6 +82,7 @@ export function registerBridgeConnection(
 		lastLabel: opts?.clientLabel,
 		prdPath: opts?.prdPath,
 		projectRoot: opts?.projectRoot,
+		contextRoots: opts?.contextRoots,
 		accessToken: opts?.accessToken,
 		linearApiKey: opts?.linearApiKey?.trim() || undefined,
 		linearTeamId: opts?.linearTeamId?.trim() || undefined
@@ -101,11 +105,15 @@ export function getBridgeLinearOverrides(workspaceId: string): {
 
 export function getBridgeClientPaths(
 	workspaceId: string
-): { projectRoot: string; prdPath: string } | null {
+): { projectRoot: string; prdPath: string; contextRoots?: string[] } | null {
 	const e = bridges.get(workspaceId);
 	if (!e || e.ws.readyState !== WebSocket.OPEN) return null;
 	if (!e.prdPath || !e.projectRoot) return null;
-	return { projectRoot: e.projectRoot, prdPath: e.prdPath };
+	return {
+		projectRoot: e.projectRoot,
+		prdPath: e.prdPath,
+		...(e.contextRoots?.length ? { contextRoots: e.contextRoots } : {})
+	};
 }
 
 export function unregisterBridgeConnection(workspaceId: string, ws: WsType) {

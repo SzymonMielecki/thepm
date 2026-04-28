@@ -90,6 +90,7 @@
     | null;
   let expandedHubPanel = $state<HubExpandedPanel>(null);
   let muxCap = $state({ flavor: "none", session: undefined as string | undefined });
+  let muxCapReady = $state(false);
   let delegationsReloadKey = $state(0);
   let toasts = $state(
     [] as { id: number; kind: "success" | "error" | "info"; message: string }[],
@@ -245,13 +246,22 @@
   }
 
   async function loadAgentsMux() {
-    if (!token.trim()) return;
-    const r = await fetch("/api/agents", { headers: authHeader() });
-    if (!r.ok) return;
-    const j = (await r.json()) as {
-      mux?: { flavor: string; session?: string };
-    };
-    if (j.mux) muxCap = { flavor: j.mux.flavor, session: j.mux.session };
+    if (!token.trim()) {
+      muxCap = { flavor: "none", session: undefined };
+      muxCapReady = true;
+      return;
+    }
+    muxCapReady = false;
+    try {
+      const r = await fetch("/api/agents", { headers: authHeader() });
+      if (!r.ok) return;
+      const j = (await r.json()) as {
+        mux?: { flavor: string; session?: string };
+      };
+      if (j.mux) muxCap = { flavor: j.mux.flavor, session: j.mux.session };
+    } finally {
+      muxCapReady = true;
+    }
   }
 
   async function saveSpeakerMapping(payload: {
@@ -352,16 +362,19 @@
           void loadDrafts();
         } else if (e.type === "delegation" || e.type === "delegation_status") {
           delegationsReloadKey += 1;
+          const d = e as { status?: string; summary?: string };
           const term =
             e.type === "delegation" &&
-            ((e as { status?: string }).status === "succeeded" ||
-              (e as { status?: string }).status === "failed");
+            (d.status === "succeeded" || d.status === "failed");
           if (term) {
-            pushToast(
-              "info",
-              `Delegation ${(e as { status?: string }).status ?? "updated"}`,
-              4000,
-            );
+            const failed = d.status === "failed";
+            const raw = (d.summary ?? "").trim();
+            const detail =
+              failed && raw.length > 0 ? raw.slice(0, 380) + (raw.length > 380 ? "…" : "") : "";
+            const line = failed
+              ? detail || `Delegation failed`
+              : `Delegation ${d.status ?? "updated"}`;
+            pushToast(failed ? "error" : "info", line, failed ? 14000 : 4000);
           }
         } else if (e.type === "capture_devices") {
           const p = e as unknown as { devices: CaptureClientInfo[] };
@@ -695,6 +708,7 @@
             onupdate={loadDrafts}
             frameless={expandedHubPanel === "drafts"}
             delegateMuxOk={muxCap.flavor !== "none"}
+            muxReady={hydrated && muxCapReady}
             {bridgeConnected}
             ontoast={(kind: "success" | "error" | "info", message: string) =>
               pushToast(kind, message)}

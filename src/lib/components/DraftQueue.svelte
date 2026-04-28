@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { responseErrorMessage } from '$lib/client/http-error-text';
+
 	type Draft = {
 		id: string;
 		title: string;
@@ -17,6 +19,7 @@
 		ontoast = (_kind: 'success' | 'error' | 'info', _message: string) => {},
 		frameless = false,
 		delegateMuxOk = false,
+		muxReady = true,
 		bridgeConnected = false
 	} = $props();
 
@@ -112,7 +115,8 @@
 				return;
 			}
 			if (!r.ok) {
-				ontoast('error', `Delegate failed (${r.status}).`);
+				const detail = await responseErrorMessage(r);
+				ontoast('error', detail || `Delegate failed (${r.status}).`);
 				return;
 			}
 			const j = (await r.json()) as { delegationId?: string };
@@ -130,10 +134,14 @@
 	let delegateWarn = $derived(
 		!token.trim() || !bridgeConnected
 			? 'Connect the code bridge and set a token to delegate.'
-			: !delegateMuxOk
-				? 'Mux not detected on bridge — run the bridge from `cmux claude-teams` (or set CMUX_SOCKET_PATH), or set THEPM_TMUX_BIN to ~/.cmuxterm/claude-teams-bin/tmux, or THEPM_MUX_SESSION.'
-				: ''
+			: !muxReady
+				? ''
+				: !delegateMuxOk
+					? 'Mux not detected on bridge — run the bridge from `cmux claude-teams` (or set CMUX_SOCKET_PATH), or set THEPM_TMUX_BIN to ~/.cmuxterm/claude-teams-bin/tmux, or THEPM_MUX_SESSION.'
+					: ''
 	);
+
+	let muxProbePending = $derived(!!token.trim() && bridgeConnected && !muxReady);
 </script>
 
 <div
@@ -141,7 +149,15 @@
 		? ''
 		: 'border border-zinc-800'}"
 >
-	{#if delegateWarn}
+	{#if muxProbePending}
+		<p class="inline-flex items-center gap-2 text-xs text-zinc-400" role="status" aria-live="polite">
+			<span
+				class="h-3.5 w-3.5 shrink-0 animate-spin rounded-full border-2 border-zinc-600 border-t-zinc-300"
+				aria-hidden="true"
+			></span>
+			Detecting multiplexer…
+		</p>
+	{:else if delegateWarn}
 		<p class="text-xs text-amber-200/90">{delegateWarn}</p>
 	{/if}
 	{#each drafts as d}

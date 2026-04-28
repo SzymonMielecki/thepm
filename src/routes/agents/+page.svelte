@@ -88,18 +88,25 @@
     eventSrc = new EventSource(u.toString());
     eventSrc.onmessage = (ev) => {
       try {
-        const e = JSON.parse(ev.data) as { type: string; status?: string };
+        const e = JSON.parse(ev.data) as {
+          type: string;
+          status?: string;
+          summary?: string;
+        };
         if (e.type === "delegation" || e.type === "delegation_status") {
           delegationsReloadKey += 1;
           const term =
             e.type === "delegation" &&
             (e.status === "succeeded" || e.status === "failed");
           if (term) {
-            pushToast(
-              "info",
-              `Delegation ${e.status ?? "updated"}`,
-              4000,
-            );
+            const failed = e.status === "failed";
+            const raw = (e.summary ?? "").trim();
+            const detail =
+              failed && raw.length > 0 ? raw.slice(0, 380) + (raw.length > 380 ? "…" : "") : "";
+            const line = failed
+              ? detail || `Delegation failed`
+              : `Delegation ${e.status ?? "updated"}`;
+            pushToast(failed ? "error" : "info", line, failed ? 14000 : 4000);
           }
         }
       } catch {
@@ -222,6 +229,7 @@
           frameless={true}
           autoRefreshOnMount={true}
           delegateMuxOk={delegateMuxOk}
+          muxReady={hydrated && muxCapReady}
           {bridgeConnected}
           ontoast={(kind: "success" | "error" | "info", message: string) =>
             pushToast(kind, message)}

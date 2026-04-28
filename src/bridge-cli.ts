@@ -5,6 +5,7 @@
  */
 import { parseArgs } from 'node:util';
 import { resolve } from 'node:path';
+import { existsSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { WebSocket } from 'ws';
 import { z } from 'zod';
@@ -17,7 +18,8 @@ const DEFAULT_PRD = 'PRD.md';
 
 const USAGE = `Usage: thepm bridge \\
   [--hub-url <url>]      (default: ${DEFAULT_HUB_URL}) \\
-  [--project-root <path>]  (default: ${DEFAULT_PROJECT_ROOT}) \\
+  [--project-root <path>]  (default: ${DEFAULT_PROJECT_ROOT}; must be ONE git checkout) \\
+  [--context-root <path>]  repeat for extra repos (frontend+backend); rg/read + delegation symlinks; not used for git worktrees \\
   [--prd <path-to-PRD.md>] (default: ${DEFAULT_PRD}) \\
   [--token <BRIDGE_TOKEN>] \\
   [--workspace <id>]     (default: default; must match hub CODE_BRIDGE_WORKSPACE_ID) \\
@@ -33,6 +35,11 @@ Example (remote or non-default paths):
   --project-root . \\
   --prd PRD.md \\
   --workspace default
+
+The bridge project root must be the root of **one** git checkout (delegation \`git worktree\` anchors there).
+Add other clones with repeated \`--context-root\`:
+  thepm bridge --project-root apps/fe --context-root ../be --prd apps/fe/PRD.md
+(not the umbrella parent unless it has its own \`.git/\`)
 
 (Older installs may still invoke \`thepm-bridge\` with the same flags.)
 
@@ -68,6 +75,7 @@ function parseBridgeCli() {
 			'hub-url': { type: 'string' },
 			token: { type: 'string' },
 			'project-root': { type: 'string' },
+			'context-root': { type: 'string', multiple: true },
 			prd: { type: 'string' },
 			workspace: { type: 'string' },
 			'linear-api-key': { type: 'string' },
@@ -99,7 +107,9 @@ function parseBridgeCli() {
 		console.error('Invalid flags:', f.error.format());
 		process.exit(1);
 	}
-	return f.data;
+	const cr = values['context-root'];
+	const contextRootCli: string[] = Array.isArray(cr) ? cr.map(String) : cr ? [String(cr)] : [];
+	return { ...f.data, contextRootCli };
 }
 
 function isConnRefused(e: unknown): boolean {
@@ -138,7 +148,21 @@ async function main() {
 	const workspace = f.workspace;
 	const hubToken = f.token?.trim() || randomUUID();
 
-	const ctx: CodeBridgeContext = { projectRoot, prdPath };
+	const contextRootsDedup = [...new Set(f.contextRootCli.map((p) => resolve(process.cwd(), p.trim())))]
+		.filter(Boolean)
+		.filter((abs) => abs !== projectRoot);
+	for (const c of contextRootsDedup) {
+		if (!existsSync(c)) {
+			// eslint-disable-next-line no-console
+			console.error(`[thepm-bridge] --context-root not found: ${c}`);
+			process.exit(1);
+		}
+	}
+	const ctx: CodeBridgeContext = {
+		projectRoot,
+		prdPath,
+		...(contextRootsDedup.length ? { contextRoots: contextRootsDedup } : {})
+	};
 	const u = new URL(hubUrl);
 	const protocol = u.protocol === 'https:' ? 'wss:' : u.protocol === 'http:' ? 'ws:' : u.protocol;
 	const qp: Record<string, string> = { workspace };
@@ -180,7 +204,8 @@ async function main() {
 			type: 'bridge_hello',
 			workspaceId: workspace,
 			projectRoot,
-			prdPath
+			prdPath,
+			...(contextRootsDedup.length ? { contextRoots: contextRootsDedup } : {})
 		};
 		const lk = f['linear-api-key']?.trim();
 		const lt = f['linear-team-id']?.trim();

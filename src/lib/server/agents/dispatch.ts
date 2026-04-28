@@ -117,6 +117,20 @@ async function startDelegationRun(input: {
 	const { db, workspaceId, target, draftId, linearIssueId, taskTitle, taskDescription } = input;
 
 	const cap = (await callBridge(workspaceId, 'mux_capabilities', {})) as MuxCapabilities;
+	// #region agent log
+	void fetch('http://127.0.0.1:7428/ingest/65f24272-8316-4d58-a12d-8cd0e27b957f', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '3983a4' },
+		body: JSON.stringify({
+			sessionId: '3983a4',
+			location: 'dispatch.ts:startDelegationRun:mux_capabilities',
+			message: 'mux_cap_after_bridge',
+			data: { hypothesisId: 'H1', flavor: cap.flavor, hasSession: !!cap.session },
+			timestamp: Date.now(),
+			runId: 'delegation-debug'
+		})
+	}).catch(() => {});
+	// #endregion
 	if (cap.flavor === 'none' || !cap.session) {
 		throw new MuxNotAvailableError(
 			'Multiplexer not detected on the bridge host: run `thepm bridge` where `tmux` can reach your session (tmux/cmux), or set THEPM_MUX_SESSION to the tmux session name.'
@@ -124,7 +138,40 @@ async function startDelegationRun(input: {
 	}
 
 	const resolved = await resolveDelegationTarget(db, workspaceId, target);
+	// #region agent log
+	void fetch('http://127.0.0.1:7428/ingest/65f24272-8316-4d58-a12d-8cd0e27b957f', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '3983a4' },
+		body: JSON.stringify({
+			sessionId: '3983a4',
+			location: 'dispatch.ts:startDelegationRun:resolve_ok',
+			message: 'resolveDelegationTarget_ok',
+			data: {
+				hypothesisId: 'H4',
+				targetName: target.name,
+				dispatch: resolved.dispatch,
+				agentCount: resolved.agentNames.length
+			},
+			timestamp: Date.now(),
+			runId: 'delegation-debug'
+		})
+	}).catch(() => {});
+	// #endregion
 	const mergedAgents = await listMergedAgents(db, workspaceId);
+	// #region agent log
+	void fetch('http://127.0.0.1:7428/ingest/65f24272-8316-4d58-a12d-8cd0e27b957f', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '3983a4' },
+		body: JSON.stringify({
+			sessionId: '3983a4',
+			location: 'dispatch.ts:startDelegationRun:merged_agents_ok',
+			message: 'listMergedAgents_ok',
+			data: { hypothesisId: 'H4', mergedCount: mergedAgents.length },
+			timestamp: Date.now(),
+			runId: 'delegation-debug'
+		})
+	}).catch(() => {});
+	// #endregion
 	const prompt = renderPromptTemplate(
 		resolved.promptTemplate,
 		{ title: taskTitle, description: taskDescription },
@@ -148,7 +195,26 @@ async function startDelegationRun(input: {
 		started_at: now,
 		updated_at: now
 	});
-	if (insDelErr) throw new Error(insDelErr.message);
+	if (insDelErr) {
+		// #region agent log
+		void fetch('http://127.0.0.1:7428/ingest/65f24272-8316-4d58-a12d-8cd0e27b957f', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '3983a4' },
+			body: JSON.stringify({
+				sessionId: '3983a4',
+				location: 'dispatch.ts:startDelegationRun:delegations_insert',
+				message: 'delegations_insert_failed',
+				data: {
+					hypothesisId: 'H3',
+					err: (insDelErr as { message?: string }).message?.slice?.(0, 200)
+				},
+				timestamp: Date.now(),
+				runId: 'delegation-debug'
+			})
+		}).catch(() => {});
+		// #endregion
+		throw new Error(insDelErr.message);
+	}
 
 	const runDefs: { id: string; agentName: string; position: number }[] = [];
 	for (let i = 0; i < resolved.agentNames.length; i++) {
@@ -277,12 +343,33 @@ async function runDelegationLifecycle(ctx: {
 	} catch (e) {
 		hadFailure = true;
 		const msg = (e as Error).message;
+		// #region agent log
+		void fetch('http://127.0.0.1:7428/ingest/65f24272-8316-4d58-a12d-8cd0e27b957f', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '3983a4' },
+			body: JSON.stringify({
+				sessionId: '3983a4',
+				location: 'dispatch.ts:runDelegationLifecycle:catch',
+				message: 'delegation_lifecycle_throw',
+				data: {
+					hypothesisId: 'H6_lifecycle',
+					msgPrefix: msg.slice(0, 220),
+					notGit:
+						msg.includes('not a git repository') ||
+						msg.includes('--is-inside-work-tree')
+				},
+				timestamp: Date.now(),
+				runId: 'delegation-debug'
+			})
+		}).catch(() => {});
+		// #endregion
 		await appendEvent(db, delegationId, null, 'error', msg);
 		const fin = new Date().toISOString();
 		await db
 			.from('delegations')
 			.update({ status: 'failed', summary: msg, finished_at: fin, updated_at: fin })
 			.eq('id', delegationId);
+		const summaryShort = msg.length > 2000 ? `${msg.slice(0, 2000)}…` : msg;
 		publish({
 			type: 'delegation',
 			id: delegationId,
@@ -290,7 +377,8 @@ async function runDelegationLifecycle(ctx: {
 			linearIssueId: linearIssueId ?? undefined,
 			targetKind: target.kind,
 			targetName: target.name,
-			status: 'failed'
+			status: 'failed',
+			summary: summaryShort
 		});
 	}
 }

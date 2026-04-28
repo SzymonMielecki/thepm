@@ -2,6 +2,7 @@ import type { RipgrepResult } from '../ripgrep';
 
 export type CodeOpName =
 	| 'read_file'
+	| 'write_file'
 	| 'list_dir'
 	| 'ripgrep'
 	| 'prd_read'
@@ -32,6 +33,8 @@ export type BridgeHelloMessage = {
 	workspaceId: string;
 	projectRoot?: string;
 	prdPath?: string;
+	/** Extra git checkouts (absolute paths) for ripgrep / read / delegation mirrored context. */
+	contextRoots?: string[];
 	/** e.g. basename of project root */
 	clientLabel?: string;
 	/** From bridge CLI; hub merges with LINEAR_* env. */

@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
+import { basename, dirname, join, resolve } from 'node:path';
 import { detectMuxCapabilities } from './mux/detect';
 import { getResolvedTmuxBin } from './mux/tmux-bin';
 import { createTmuxAdapter } from './mux/tmux';
@@ -40,17 +40,29 @@ function claudeCommandParts(): string[] {
 	return raw.split(/\s+/).filter(Boolean);
 }
 
+function dangerouslySkipPermissionsEnabled(): boolean {
+	const v = (process.env.THEPM_CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS ?? '').trim().toLowerCase();
+	return v === '1' || v === 'true' || v === 'yes';
+}
+
 /** Claude Code agent teams (https://code.claude.com/docs/en/agent-teams). */
 function buildClaudeCommandParts(
 	cap: { flavor: 'tmux' | 'cmux' | 'none'; session?: string },
 	agentTeams: boolean
 ): string[] {
 	const argv = claudeCommandParts();
-	const base = argv.length ? argv : ['claude'];
-	if (!agentTeams) return base;
-	const withEnv = ['env', 'CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1', ...base];
-	if (cap.flavor === 'tmux' || cap.flavor === 'cmux') {
+	const parts = argv.length ? [...argv] : ['claude'];
+	if (dangerouslySkipPermissionsEnabled()) {
+		parts.push('--dangerously-skip-permissions');
+	}
+	if (!agentTeams) return parts;
+	const envPairs = ['CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1'];
+	const withEnv = ['env', ...envPairs, ...parts];
+	if (cap.flavor === 'tmux') {
 		withEnv.push('--teammate-mode', 'tmux');
+	} else if (cap.flavor === 'cmux') {
+		// Match `cmux claude-teams` default: split panes when “in tmux” (shim), without forcing `--teammate-mode tmux`.
+		withEnv.push('--teammate-mode', 'auto');
 	}
 	return withEnv;
 }
@@ -88,8 +100,47 @@ function buildAgentTeamLeadPrompt(
 	].join('\n');
 }
 
+/** Symlink extra clones into `.thepm/context/` and note them at the bottom of `.thepm/prompt.md`. */
+function linkExtraContextReposIntoWorktree(
+	worktreePath: string,
+	contextRoots: string[],
+	promptPath: string
+): void {
+	if (!contextRoots.length) return;
+	const ctxDir = join(worktreePath, '.thepm', 'context');
+	mkdirSync(ctxDir, { recursive: true });
+	const used = new Set<string>();
+	const lines: string[] = [
+		'',
+		'## Additional repositories (read-only)',
+		'Checkouts mirrored under `.thepm/context/<name>/` (from bridge `--context-root`). Hub `read_file` / `write_file` use paths like `__context/0/relative/path` (index matches `--context-root`). Edits in the worktree via these symlinks change the sibling repo on disk.',
+		''
+	];
+	for (let i = 0; i < contextRoots.length; i++) {
+		const abs = resolve(contextRoots[i]);
+		if (!existsSync(abs)) {
+			lines.push(`- (skipped, missing path) \`${abs}\``);
+			continue;
+		}
+		let label = basename(abs).replace(/\W+/g, '_') || `repo_${i}`;
+		let cand = label;
+		for (let u = 2; used.has(cand); u++) cand = `${label}_${u}`;
+		used.add(cand);
+		const dest = join(ctxDir, cand);
+		try {
+			symlinkSync(abs, dest, 'dir');
+			lines.push(`- \`.thepm/context/${cand}/\` → \`${abs}\` (\`__context/${i}/...\` on the hub)`);
+		} catch (e) {
+			lines.push(`- (could not symlink) \`${abs}\`: ${(e as Error).message}`);
+		}
+	}
+	writeFileSync(join(ctxDir, 'README.md'), lines.filter(Boolean).join('\n'), 'utf-8');
+	const prev = readFileSync(promptPath, 'utf-8');
+	writeFileSync(promptPath, `${prev}\n${lines.join('\n')}`, 'utf-8');
+}
+
 export async function handleMuxDispatch(
-	ctx: { projectRoot: string; prdPath: string },
+	ctx: { projectRoot: string; prdPath: string; contextRoots?: string[] },
 	args: Record<string, unknown>
 ): Promise<{
 	windowId: string;
@@ -141,6 +192,20 @@ export async function handleMuxDispatch(
 	}
 
 	const projectRoot = ctx.projectRoot;
+	try {
+		await execFileAsync('git', ['rev-parse', '--is-inside-work-tree'], {
+			cwd: projectRoot,
+			encoding: 'utf-8'
+		});
+	} catch {
+		throw new Error(
+			`Delegation needs a git checkout at the bridge project root (${projectRoot}). ` +
+				`That path must be one repository root (contain .git/). ` +
+				`If you are in an umbrella folder that only holds several clones, point the bridge ` +
+				`at the inner repo (--project-root path/to/that/repo and --prd under it), or cd into that repo first. ` +
+				`Or run git init in the directory you use as project root and commit.`
+		);
+	}
 	const root = worktreeRootDir(projectRoot, workspaceId);
 	mkdirSync(root, { recursive: true });
 
@@ -177,6 +242,7 @@ export async function handleMuxDispatch(
 	mkdirSync(thepmDir, { recursive: true });
 	const promptPath = join(thepmDir, 'prompt.md');
 	writeFileSync(promptPath, prompt, 'utf-8');
+	linkExtraContextReposIntoWorktree(worktreePath, ctx.contextRoots ?? [], promptPath);
 
 	const tmuxBin = getResolvedTmuxBin();
 	const adapter = createTmuxAdapter({ session: cap.session, flavor: cap.flavor, tmuxBin });

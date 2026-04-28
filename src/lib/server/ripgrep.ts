@@ -1,5 +1,6 @@
 import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import { promisify } from 'node:util';
+import { join, resolve } from 'node:path';
 import { getProjectPaths } from './config';
 
 const pExec = promisify(execFile);
@@ -28,13 +29,30 @@ export async function ensureRipgrep(): Promise<void> {
  */
 export async function runRipgrep(
 	pattern: string,
-	options?: { max?: number; path?: string; projectRoot?: string }
+	options?: {
+		max?: number;
+		path?: string;
+		projectRoot?: string;
+		/** Additional repository roots to search (absolute); same relative subpath as primary when `path` is set. */
+		extraSearchRoots?: string[];
+	}
 ): Promise<RipgrepResult[]> {
 	await ensureRipgrep();
 	const { projectRoot: rootFromConfig } = getProjectPaths();
-	const projectRoot = options?.projectRoot ?? rootFromConfig;
+	const projectRoot = resolve(options?.projectRoot ?? rootFromConfig);
 	const max = options?.max ?? 40;
-	const target = options?.path ?? '.';
+	const sub = (options?.path ?? '').trim() || '';
+	const extras = (options?.extraSearchRoots ?? [])
+		.map((p) => resolve(p))
+		.filter((p) => p && p !== projectRoot);
+	const roots = [projectRoot, ...extras];
+	const seen = new Set<string>();
+	const searchPaths: string[] = [];
+	for (const r of roots) {
+		if (seen.has(r)) continue;
+		seen.add(r);
+		searchPaths.push(sub ? join(r, sub) : r);
+	}
 	const args = [
 		'--json',
 		'--line-number',
@@ -42,7 +60,7 @@ export async function runRipgrep(
 		'--max-count',
 		String(max),
 		pattern,
-		target
+		...searchPaths
 	];
 	let stdout: string;
 	try {

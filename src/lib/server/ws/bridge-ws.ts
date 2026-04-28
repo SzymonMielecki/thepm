@@ -16,7 +16,13 @@ const pathSchema = z.object({
 	PRD_PATH: z.string().min(1)
 });
 
-type State = { workspaceId: string; projectRoot: string; prdPath: string; ready: boolean };
+type State = {
+	workspaceId: string;
+	projectRoot: string;
+	prdPath: string;
+	contextRoots: string[];
+	ready: boolean;
+};
 
 function send(ws: WebSocket, obj: object) {
 	if (ws.readyState === WebSocket.OPEN) {
@@ -36,12 +42,19 @@ export function handleBridgeSocket(ws: WebSocket, req: IncomingMessage) {
 		return;
 	}
 	const workspaceId = (u.searchParams.get('workspace') || 'default').trim() || 'default';
-	const st: State = { workspaceId, prdPath: '', projectRoot: '', ready: false };
+	const st: State = {
+		workspaceId,
+		prdPath: '',
+		projectRoot: '',
+		contextRoots: [],
+		ready: false
+	};
 
 	const finish = (
 		projectRoot: string,
 		prdPath: string,
-		linear?: { apiKey?: string; teamId?: string }
+		linear?: { apiKey?: string; teamId?: string },
+		contextRoots?: string[]
 	) => {
 		if (st.ready) return;
 		const p = pathSchema.safeParse({ PROJECT_ROOT: projectRoot, PRD_PATH: prdPath });
@@ -51,11 +64,15 @@ export function handleBridgeSocket(ws: WebSocket, req: IncomingMessage) {
 		}
 		st.projectRoot = p.data.PROJECT_ROOT;
 		st.prdPath = p.data.PRD_PATH;
+		st.contextRoots = Array.isArray(contextRoots)
+			? [...new Set(contextRoots.filter((x): x is string => typeof x === 'string' && !!x.trim()))]
+			: [];
 		st.ready = true;
 		registerBridgeConnection(st.workspaceId, ws, {
 			clientLabel: st.projectRoot,
 			projectRoot: st.projectRoot,
 			prdPath: st.prdPath,
+			contextRoots: st.contextRoots.length ? st.contextRoots : undefined,
 			accessToken: token,
 			linearApiKey: linear?.apiKey,
 			linearTeamId: linear?.teamId
@@ -87,14 +104,19 @@ export function handleBridgeSocket(ws: WebSocket, req: IncomingMessage) {
 		const pRoot = (j as { projectRoot?: string; prdPath?: string }).projectRoot;
 		const pPrd = (j as { projectRoot?: string; prdPath?: string }).prdPath;
 		if (typeof pRoot === 'string' && typeof pPrd === 'string' && pRoot && pPrd) {
-			const jo = j as { linearApiKey?: unknown; linearTeamId?: unknown };
+			const jo = j as { linearApiKey?: unknown; linearTeamId?: unknown; contextRoots?: unknown };
 			const lk = typeof jo.linearApiKey === 'string' ? jo.linearApiKey.trim() : undefined;
 			const lt = typeof jo.linearTeamId === 'string' ? jo.linearTeamId.trim() : undefined;
 			const linear =
 				lk || lt
 					? { apiKey: lk || undefined, teamId: lt || undefined }
 					: undefined;
-			finish(pRoot, pPrd, linear);
+			const cx = jo.contextRoots;
+			const roots =
+				Array.isArray(cx) && cx.length
+					? cx.filter((x): x is string => typeof x === 'string' && x.trim().length > 0)
+					: undefined;
+			finish(pRoot, pPrd, linear, roots);
 		}
 	};
 

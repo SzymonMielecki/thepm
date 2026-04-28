@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { responseErrorMessage } from '$lib/client/http-error-text';
+
 	type TeamRow = { source: string; name: string; shadowed?: boolean; dispatch?: string };
 	type IssueRow = {
 		id: string;
@@ -31,6 +33,8 @@
 		ontoast = (_kind: 'success' | 'error' | 'info', _message: string) => {},
 		frameless = false,
 		delegateMuxOk = false,
+		/** When false, mux warning is hidden and a loader is shown (agents page during `/api/agents` mux probe). Default true = treat mux as known. */
+		muxReady = true,
 		bridgeConnected = false,
 		autoRefreshOnMount = false
 	} = $props();
@@ -222,7 +226,26 @@
 				return;
 			}
 			if (!r.ok) {
-				ontoast('error', `Delegate failed (${r.status}).`);
+				const detail = await responseErrorMessage(r);
+				// #region agent log
+				void fetch('http://127.0.0.1:7428/ingest/65f24272-8316-4d58-a12d-8cd0e27b957f', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '3983a4' },
+					body: JSON.stringify({
+						sessionId: '3983a4',
+						location: 'LinearIssuesDelegate.svelte:submitDelegate',
+						message: 'delegate_http_error',
+						data: {
+							hypothesisId: 'H5',
+							status: r.status,
+							detailPrefix: detail.slice(0, 120)
+						},
+						timestamp: Date.now(),
+						runId: 'delegation-debug'
+					})
+				}).catch(() => {});
+				// #endregion
+				ontoast('error', detail || `Delegate failed (${r.status}).`);
 				return;
 			}
 			const j = (await r.json()) as { delegationId?: string };
@@ -241,9 +264,15 @@
 			? 'Configure LINEAR_API_KEY and LINEAR_TEAM_ID (or bridge flags) to list team issues.'
 			: !token.trim() || !bridgeConnected
 				? 'Connect the code bridge and set a token to delegate.'
-				: !delegateMuxOk
-					? 'Mux not detected on bridge — run the bridge from `cmux claude-teams` (or set CMUX_SOCKET_PATH), or set THEPM_TMUX_BIN to ~/.cmuxterm/claude-teams-bin/tmux, or THEPM_MUX_SESSION.'
-					: ''
+				: !muxReady
+					? ''
+					: !delegateMuxOk
+						? 'Mux not detected on bridge — run the bridge from `cmux claude-teams` (or set CMUX_SOCKET_PATH), or set THEPM_TMUX_BIN to ~/.cmuxterm/claude-teams-bin/tmux, or THEPM_MUX_SESSION.'
+						: ''
+	);
+
+	let muxProbePending = $derived(
+		!!token.trim() && linearConfigured && bridgeConnected && !muxReady
 	);
 </script>
 
@@ -343,7 +372,15 @@
 		{/if}
 	</div>
 
-	{#if delegateWarn}
+	{#if muxProbePending}
+		<p class="inline-flex shrink-0 items-center gap-2 text-xs text-zinc-400" role="status" aria-live="polite">
+			<span
+				class="h-3.5 w-3.5 shrink-0 animate-spin rounded-full border-2 border-zinc-600 border-t-zinc-300"
+				aria-hidden="true"
+			></span>
+			Detecting multiplexer…
+		</p>
+	{:else if delegateWarn}
 		<p class="shrink-0 text-xs text-amber-200/90">{delegateWarn}</p>
 	{/if}
 	{#if issuesError}

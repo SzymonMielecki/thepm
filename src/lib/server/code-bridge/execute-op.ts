@@ -1,6 +1,6 @@
 import { writeFileSync, existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, join, relative, sep } from 'node:path';
-import { readScopedFile, listScopedDir } from '../fs-scoped';
+import { readScopedFile, writeScopedFile, listScopedDir, resolveMultiRootRead } from '../fs-scoped';
 import { runRipgrep } from '../ripgrep';
 import { getPrdContent, patchSection } from '../prd/store';
 import type { CodeOpName } from './protocol';
@@ -30,6 +30,8 @@ function readMdFilesInDir(projectRoot: string, relDir: string): { path: string; 
 export type CodeBridgeContext = {
 	projectRoot: string;
 	prdPath: string;
+	/** Absolute paths to extra clones (frontend + backend, etc.). Read/write/rg + delegation; git worktrees use `projectRoot`. */
+	contextRoots?: string[];
 };
 
 /**
@@ -45,18 +47,36 @@ export async function executeCodeOp(
 		case 'read_file': {
 			const rel = typeof args.path === 'string' ? args.path : '';
 			if (!rel) throw new Error('read_file: path required');
-			return readScopedFile(ctx.projectRoot, rel);
+			const xr = ctx.contextRoots ?? [];
+			const { root, relInRoot } = resolveMultiRootRead(ctx.projectRoot, xr, rel);
+			return readScopedFile(root, relInRoot);
+		}
+		case 'write_file': {
+			const rel = typeof args.path === 'string' ? args.path : '';
+			const content = typeof args.content === 'string' ? args.content : '';
+			if (!rel) throw new Error('write_file: path required');
+			const xr = ctx.contextRoots ?? [];
+			const { root, relInRoot } = resolveMultiRootRead(ctx.projectRoot, xr, rel);
+			writeScopedFile(root, relInRoot, content);
+			return { ok: true as const };
 		}
 		case 'list_dir': {
 			const p = typeof args.path === 'string' ? args.path : '';
-			return listScopedDir(ctx.projectRoot, p);
+			const xr = ctx.contextRoots ?? [];
+			const { root, relInRoot } = resolveMultiRootRead(ctx.projectRoot, xr, p);
+			return listScopedDir(root, relInRoot);
 		}
 		case 'ripgrep': {
 			const pattern = typeof args.pattern === 'string' ? args.pattern : '';
 			if (pattern.length < 1) throw new Error('ripgrep: pattern required');
 			const subpath = typeof args.subpath === 'string' ? args.subpath : undefined;
 			const max = typeof args.max === 'number' ? args.max : 40;
-			const hits = await runRipgrep(pattern, { path: subpath, max, projectRoot: ctx.projectRoot });
+			const hits = await runRipgrep(pattern, {
+				path: subpath,
+				max,
+				projectRoot: ctx.projectRoot,
+				extraSearchRoots: ctx.contextRoots
+			});
 			return { hits };
 		}
 		case 'prd_read': {
@@ -113,8 +133,19 @@ export async function executeCodeOp(
 			return handleMuxNotify(args);
 		}
 		case 'get_delegation_repo_files': {
-			const claudeAgents = readMdFilesInDir(ctx.projectRoot, join('.claude', 'agents'));
-			const claudeTeams = readMdFilesInDir(ctx.projectRoot, join('.claude', 'teams'));
+			const roots = [ctx.projectRoot, ...(ctx.contextRoots ?? [])];
+			const agMap = new Map<string, { path: string; content: string }>();
+			const teamMap = new Map<string, { path: string; content: string }>();
+			for (const r of roots) {
+				for (const f of readMdFilesInDir(r, join('.claude', 'agents'))) {
+					agMap.set(f.path, f);
+				}
+				for (const f of readMdFilesInDir(r, join('.claude', 'teams'))) {
+					teamMap.set(f.path, f);
+				}
+			}
+			const claudeAgents = [...agMap.values()];
+			const claudeTeams = [...teamMap.values()];
 			const teamsJsonPath = join(ctx.projectRoot, '.thepm', 'teams.json');
 			let thepmTeamsJson: string | null = null;
 			if (existsSync(teamsJsonPath)) {

@@ -35,6 +35,8 @@ export type DelegationEvent = {
 	targetKind: 'agent' | 'team';
 	targetName: string;
 	status: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
+	/** Present when status is failed: error detail for UI (delegation lifecycle). */
+	summary?: string;
 };
 export type DelegationStatusEvent = {
 	type: 'delegation_status';

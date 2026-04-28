@@ -14,6 +14,7 @@ export type CodeBackend = {
 	projectRoot: string;
 	prdPath: string;
 	readFile(relPath: string): Promise<string>;
+	writeFile(relPath: string, content: string): Promise<{ ok: true }>;
 	listDir(relPath: string): Promise<{ name: string; isDir: boolean }[]>;
 	ripgrep(
 		pattern: string,
@@ -32,6 +33,8 @@ function createBridge(workspaceId: string): CodeBackend {
 		projectRoot,
 		prdPath,
 		readFile: (rel) => callFor('read_file', { path: rel }, workspaceId) as Promise<string>,
+		writeFile: (rel, content) =>
+			callFor('write_file', { path: rel, content }, workspaceId) as Promise<{ ok: true }>,
 		listDir: (rel) => callFor('list_dir', { path: rel ?? '' }, workspaceId) as Promise<
 			{ name: string; isDir: boolean }[]
 		>,

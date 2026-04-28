@@ -1,5 +1,5 @@
-import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
-import { join, relative, resolve } from 'node:path';
+import { mkdirSync, readFileSync, readdirSync, statSync, existsSync, writeFileSync } from 'node:fs';
+import { dirname, join, relative, resolve } from 'node:path';
 
 export function isPathInsideRoot(root: string, candidate: string): boolean {
 	const r = resolve(root);
@@ -37,4 +37,36 @@ export function resolveInRoot(root: string, p: string) {
 	const abs = resolve(root, p);
 	if (!isPathInsideRoot(root, abs)) throw new Error('Path escapes PROJECT_ROOT');
 	return abs;
+}
+
+/** `__context/0/rel/path` addresses the Nth bridge `--context-root` (0-based). Otherwise paths are relative to primary project root. */
+const CONTEXT_PATH = /^__context\/(\d+)\/(.*)$/;
+
+export function resolveMultiRootRead(
+	primary: string,
+	contextRoots: string[],
+	relPath: string
+): { root: string; relInRoot: string } {
+	const m = relPath.match(CONTEXT_PATH);
+	if (!m) return { root: primary, relInRoot: relPath };
+	const idx = Number(m[1]);
+	const rest = m[2] ?? '';
+	if (!Number.isInteger(idx) || idx < 0 || idx >= contextRoots.length) {
+		throw new Error(
+			`Invalid path: __context/${m[1]}/… — bridge reported ${contextRoots.length} extra context root(s) (use --context-root).`
+		);
+	}
+	return { root: contextRoots[idx], relInRoot: rest };
+}
+
+/** Create parent dirs as needed; rejects directory paths and path traversal. */
+export function writeScopedFile(root: string, relPath: string, content: string): void {
+	const norm = relPath.replace(/^[/\\]+/, '');
+	if (!norm || norm.endsWith('/') || norm.endsWith('\\')) {
+		throw new Error('write_file: path must be a file path');
+	}
+	const abs = join(root, norm);
+	if (!isPathInsideRoot(root, abs)) throw new Error('Path escapes PROJECT_ROOT');
+	mkdirSync(dirname(abs), { recursive: true });
+	writeFileSync(abs, content, 'utf-8');
 }

@@ -36,10 +36,32 @@ export const POST = async (event: RequestEvent) => {
 		});
 		return json({ ok: true, delegationId: out.delegationId, runIds: out.runIds });
 	} catch (e) {
+		const msg = (e as Error).message ?? String(e);
+		const isMux = e instanceof MuxNotAvailableError;
+		const isLinearTeam =
+			msg.includes('not in the team configured') || msg.includes('LINEAR_TEAM_ID');
+		// #region agent log
+		void fetch('http://127.0.0.1:7428/ingest/65f24272-8316-4d58-a12d-8cd0e27b957f', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '3983a4' },
+			body: JSON.stringify({
+				sessionId: '3983a4',
+				location: 'api/linear/issues/delegate/+server.ts:catch',
+				message: 'delegate_linear_issue_error',
+				data: {
+					hypothesisId: isMux ? 'H1' : isLinearTeam ? 'H2' : 'H3_or_H4_or_other',
+					isMux,
+					statusHint: isMux ? 412 : msg.includes('not in the team configured') ? 403 : '5xx',
+					msgPrefix: msg.slice(0, 160)
+				},
+				timestamp: Date.now(),
+				runId: 'delegation-debug'
+			})
+		}).catch(() => {});
+		// #endregion
 		if (e instanceof MuxNotAvailableError) {
 			return error(412, e.message);
 		}
-		const msg = (e as Error).message;
 		if (msg.includes('not in the team configured')) return error(403, msg);
 		if (msg.includes('LINEAR_TEAM_ID')) return error(503, msg);
 		return error(500, msg);

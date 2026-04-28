@@ -5,4 +5,5 @@
 3. From **the same shell** (or export `CMUX_SOCKET_PATH`), run `thepm bridge` with the same hub URL and token. The bridge auto-uses the shim when the socket is set so `tmux` commands go to **cmux**, not system tmux (which would error on the wrong socket).
 4. If mux still shows “none”, set **`THEPM_TMUX_BIN`** to the shim path above, or **`THEPM_MUX=cmux`** if the shim exists, and optionally **`THEPM_MUX_SESSION`**.
 5. Open **Agents** → confirm mux shows `cmux` and a session name.
-6. Create a ticket draft and click **Delegate**; a **split** should open in the **current** cmux workspace (the shim maps `new-window` to a new sidebar workspace, so the bridge uses `split-window` instead).
+6. Create a ticket draft and click **Delegate**; by default the lead opens in a **new cmux workspace** (`new-window` via the shim). Set **`THEPM_CMUX_LEAD_SPAWN=split`** on the bridge for a **split** in the current workspace instead.
+7. Optional: **`THEPM_CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS=1`** on the bridge to pass **`--dangerously-skip-permissions`** to delegated Claude Code (teammates inherit); use only on trusted worktrees.
