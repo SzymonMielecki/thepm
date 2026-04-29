@@ -295,6 +295,19 @@
     await loadDelegations();
   }
 
+  async function dismissDelegation(id: string) {
+    const r = await fetch(`/api/delegations/${id}`, {
+      method: "DELETE",
+      headers: authHeader(),
+    });
+    if (!r.ok) {
+      ontoast("error", `Dismiss failed (${r.status})`);
+      return;
+    }
+    ontoast("success", "Delegation dismissed.");
+    await loadDelegations();
+  }
+
   async function focusRun(delegationId: string, runId: string) {
     const r = await fetch(`/api/delegations/${delegationId}/runs/${runId}/focus`, {
       method: "POST",
@@ -407,6 +420,12 @@
                 type="button"
                 class="mt-2 text-rose-400 hover:underline"
                 onclick={() => void cancelDelegation(String(del.id))}>Cancel</button
+              >
+            {:else if String(del.status) === 'cancelled' || String(del.status) === 'failed' || String(del.status) === 'succeeded'}
+              <button
+                type="button"
+                class="mt-2 text-zinc-500 hover:text-zinc-300 hover:underline"
+                onclick={() => void dismissDelegation(String(del.id))}>Dismiss</button
               >
             {/if}
           </li>

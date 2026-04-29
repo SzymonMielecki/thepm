@@ -34,11 +34,22 @@ export const DELETE = async (event: RequestEvent) => {
 	const id = event.params.id;
 	if (!id) return error(400, 'id');
 	const db = getOrCreateDatabase();
-	const { data: del } = await db.from('delegations').select('id').eq('id', id).maybeSingle();
+	const { data: del } = await db
+		.from('delegations')
+		.select('id,status')
+		.eq('id', id)
+		.maybeSingle();
 	if (!del) return error(404, 'not found');
+	const status = (del as { status?: string }).status;
+	const terminal = status === 'succeeded' || status === 'failed' || status === 'cancelled';
 	try {
+		if (terminal) {
+			const { error: dErr } = await db.from('delegations').delete().eq('id', id);
+			if (dErr) return error(500, dErr.message);
+			return json({ ok: true, dismissed: true });
+		}
 		await cancelDelegation(db, getEnv().codeBridgeWorkspaceId, id);
-		return json({ ok: true });
+		return json({ ok: true, cancelled: true });
 	} catch (e) {
 		return error(500, (e as Error).message);
 	}

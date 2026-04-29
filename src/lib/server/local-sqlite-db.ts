@@ -22,6 +22,16 @@ function loadInitMigrationSql(): string {
 	);
 }
 
+function loadPostInitMigrationSql(id: (typeof MIGRATION_IDS_AFTER_INIT)[number]): string {
+	const m = __THEPM_POST_INIT_MIGRATIONS__;
+	const fromBundle = m?.[id];
+	if (typeof fromBundle === 'string' && fromBundle.length > 0) return fromBundle;
+	return readFileSync(
+		fileURLToPath(new URL(`./migrations/${id}.sql`, import.meta.url)),
+		'utf-8'
+	);
+}
+
 function defaultSqlitePath(): string {
 	const override = (process.env.THEPM_SQLITE_PATH ?? '').trim();
 	if (override) return override;
@@ -57,10 +67,7 @@ function applyPendingMigrations(db: Database.Database) {
 				| { id: string }
 				| undefined;
 			if (applied) continue;
-			const sql = readFileSync(
-				fileURLToPath(new URL(`./migrations/${id}.sql`, import.meta.url)),
-				'utf-8'
-			);
+			const sql = loadPostInitMigrationSql(id);
 			db.exec(sql);
 		}
 	} catch {

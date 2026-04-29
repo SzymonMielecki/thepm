@@ -12,6 +12,21 @@ const INIT_MIGRATION_SQL = readFileSync(
 	"utf-8"
 );
 
+/** Keep in sync with `MIGRATION_IDS_AFTER_INIT` in `src/lib/server/local-sqlite-db.ts`. */
+const POST_INIT_MIGRATION_IDS = [
+	"002_agents",
+	"003_catalog",
+	"004_ticket_drafts_project_root",
+	"005_delegations_linear",
+] as const;
+
+const POST_INIT_MIGRATIONS_SQL = Object.fromEntries(
+	POST_INIT_MIGRATION_IDS.map((id) => [
+		id,
+		readFileSync(path.join(viteDir, `src/lib/server/migrations/${id}.sql`), "utf-8"),
+	])
+) as Record<(typeof POST_INIT_MIGRATION_IDS)[number], string>;
+
 /** PRD is written by the hub/agent; watching it triggers a full Vite reload and wipes client state. */
 function prdPathsToIgnoreInDevWatch(): string[] {
   const out = new Set<string>(["**/PRD.md"]);
@@ -33,6 +48,7 @@ export default defineConfig({
   define: {
     /** Inlined into SSR/client bundles so `readFileSync` is not needed at runtime in `build/`. */
     __THEPM_INIT_SQL__: JSON.stringify(INIT_MIGRATION_SQL),
+    __THEPM_POST_INIT_MIGRATIONS__: JSON.stringify(POST_INIT_MIGRATIONS_SQL),
   },
   // Tailscale Funnel and other local proxies expect something listening; match
   // `tailscale funnel <port>` to this port (default 5173 with `npm run dev`).
